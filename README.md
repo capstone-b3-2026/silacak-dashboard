@@ -1,0 +1,565 @@
+# SiLacak Dashboard
+
+Dashboard monitoring lokasi pendaki untuk area tanpa sinyal seluler. Sistem ini menerima data dari base station LoRa lewat port serial USB, menyimpannya, lalu menampilkannya kepada petugas basecamp pada peta, lengkap dengan diagnostik kualitas tautan. Seluruh layanan berjalan lokal di satu laptop atau mini-PC, tanpa internet.
+
+Dokumen ini hanya membahas bagian perangkat lunak (dashboard, backend, basis data, dan bridge serial). Perangkat keras dan firmware dikerjakan tim lain.
+
+<!-- Tambahkan tangkapan layar dashboard di sini: ![Dashboard](docs/dashboard.png) -->
+
+## Daftar Isi
+
+1. [Status](#status)
+2. [Fitur](#fitur)
+3. [Perbedaan dengan C-251 dan Alasannya](#perbedaan-dengan-c-251-dan-alasannya)
+4. [Alur Data dan Stack](#alur-data-dan-stack)
+5. [Menjalankan](#menjalankan)
+6. [Cara Penggunaan](#cara-penggunaan)
+7. [Menghubungkan Base Station](#menghubungkan-base-station)
+8. [Mengakses Basis Data](#mengakses-basis-data)
+9. [Push Konfigurasi ke Perangkat](#push-konfigurasi-ke-perangkat)
+10. [Diagnostik Tautan: Definisi dan Batasan](#diagnostik-tautan-definisi-dan-batasan)
+11. [Konfigurasi](#konfigurasi)
+12. [Data Sintetis](#data-sintetis-pengembangan)
+13. [Struktur Folder dan API](#struktur-folder)
+14. [Keamanan](#keamanan)
+15. [Batasan yang Diketahui](#batasan-yang-diketahui)
+16. [Langkah Selanjutnya](#langkah-selanjutnya)
+17. [Pemecahan Masalah](#pemecahan-masalah)
+18. [Catatan Teknis](#catatan-teknis)
+
+## Status
+
+| Hal | Status |
+|---|---|
+| Dashboard, backend, basis data, bridge serial | Diimplementasikan |
+| Pengujian otomatis | Belum ada |
+| Pengujian end-to-end dengan hardware nyata | Belum didokumentasikan sebagai selesai |
+| Relay node dan pengujian multi-hop | Belum ada (relay belum dibangun) |
+| Tombol SOS manual, data baterai, SNR | Belum tersedia pada paket data dari firmware |
+| Penggunaan di jaringan terbuka | Tidak disarankan (lihat bagian Keamanan) |
+
+## Fitur
+
+- Peta 2D dan 3D (MapLibre GL) dengan peta dasar topo offline yang dibangkitkan dari DEM, serta OpenStreetMap online sebagai opsi tambahan.
+- Marker posisi, jejak per sesi, dan popup per pendaki. Bila paket terbaru tidak punya GPS fix, marker tetap di lokasi fix terakhir dan diberi lencana "gps invalid".
+- Sesi pendakian (check-in dan check-out) per perangkat, dengan data pendaki dan kontak darurat. Satu perangkat hanya boleh punya satu sesi aktif.
+- Alarm "stagnan" otomatis bila pendaki berada dalam radius tertentu selama jendela waktu tertentu. Alarm dapat di-acknowledge dari dashboard dan memicu overlay bersuara.
+- Diagnostik tautan per sesi aktif: PDR, latensi, status GPS, jarak ke base, status node basi, dan packet log.
+- Grafik RSSI terhadap jarak ke base untuk paket langsung (0 hop), dengan estimasi eksponen redaman lintasan n dan simpangan baku shadowing sigma.
+- Halaman Setup: unggah DEM GeoTIFF, tentukan posisi base dan jalur, jalankan perencana penempatan relay (analisis garis pandang dan zona Fresnel), geser posisi relay secara manual, dan ekspor rencana ke GPX.
+- Ekspor jejak sesi ke GPX.
+- Manajemen perangkat dan antrean konfigurasi (SF, interval lapor, daya) yang dikirim bridge ke port serial.
+
+## Perbedaan dengan C-251 dan Alasannya
+
+Prinsip yang dipakai: setiap perubahan terhadap C-251 harus bisa dibela dengan bukti yang dapat diperiksa (persyaratan C-251 sendiri, datasheet atau literatur, atau artefak kode). Hal yang belum memenuhi spesifikasi C-251 tidak dibela sebagai perubahan. Hal itu dicatat apa adanya sebagai kesenjangan beserta rencana penutupannya.
+
+Nomor subbab C-251 di bawah dirujuk dari draf C-601. Cocokkan dengan dokumen C-251 sebelum dikutip di dokumen resmi.
+
+### Yang dipertahankan dari C-251
+
+| Aspek | Keputusan C-251 | Status |
+|---|---|---|
+| Teknologi komunikasi | LoRa, modul E220-900T22D | Dipakai |
+| Topologi | Hybrid direct-mesh | Tautan langsung dipakai, relay belum dibangun |
+| Penentuan posisi | GPS NEO-6M, fix valid bila jumlah satelit minimal 4 dan HDOP paling besar 5 | Dipakai, validitas dihitung di bridge |
+| Strategi relay | Berdasarkan elevasi dan area tanpa sinyal | Diwujudkan oleh perencana pada DEM nyata |
+| Catu daya relay | Panel surya, baterai, MPPT | Ranah tim hardware, di luar dashboard |
+
+### Yang berubah dan alasannya
+
+| ID | Aspek | C-251 | Implementasi sekarang | Alasan dan bukti |
+|---|---|---|---|---|
+| P01 | Basis data | SQLite pada single-board computer, 3 tabel (Subbab 2.7.3) | PostgreSQL, PostGIS, TimescaleDB lewat Docker di laptop basecamp | Jarak ke base dan deteksi stagnan dihitung di basis data dengan tipe `geography` (`ST_Distance`, `ST_DWithin`). Penyampaian data tanpa polling memakai `LISTEN/NOTIFY` yang tidak dimiliki SQLite. RAB C-251 menyebut laptop basecamp sudah tersedia dan tidak membeli SBC, jadi biaya perangkat tidak naik. Tetap sepenuhnya lokal tanpa internet. Biaya yang ditanggung: butuh Docker dan memori lebih besar. Bukti: `docker-compose.yml`, `schema.py`, `find_stagnant_sessions` di `position_repo.py`. |
+| P02 | Peta | Leaflet dengan OpenStreetMap (Subbab 2.7.2) | MapLibre GL 2D dan 3D, peta topo offline dari DEM, OSM sebagai opsi | C-251 menetapkan bahwa LOS atau NLOS ditentukan oleh relief, jadi petugas yang menilai tautan perlu melihat relief. Ubin topo dibangkitkan dari DEM yang sama dengan perencana, sehingga basecamp tidak bergantung pada penyedia ubin. Fungsi inti (marker, polyline jejak, popup) tetap ada. Bukti: `MapView.vue`, `dem_ingest.py`. |
+| P03 | Real-time | WebSocket dua arah, target pembaruan 60 detik (Subbab 2.7.1) | SSE melalui `pg_notify`, aksi pengguna lewat REST | Satu-satunya aliran kontinu adalah dari server ke klien. Aksi klien (check-in, setup) bersifat diskret. `EventSource` menyambung ulang otomatis. Target 60 detik tidak bergantung pada protokol karena interval lapor 30 detik jauh lebih besar daripada waktu penerusan di jaringan lokal. Batas: SSE satu arah dan peramban membatasi sekitar enam koneksi per origin. |
+| P04 | Skema paket | Payload konseptual: ID, koordinat, timestamp, baterai, RSSI, SNR, SOS | 18 field `CSV_DATA` dari firmware nyata | Ditambahkan nomor urut, rute dan jumlah hop, kecepatan, satelit, HDOP, penanda GPS, penghitung paket hilang, dan waktu GPS. Semuanya dibutuhkan oleh kriteria C-251 sendiri (validitas GPS, membedakan paket langsung dan relay, PDR, latensi). Baterai, SNR, dan SOS tidak ada pada firmware saat ini. Itu kesenjangan, bukan perubahan yang dibela. |
+| P05 | PDR | Diterima dibagi dikirim (Subbab 2.5.1) | Dihitung dari penghitung paket hilang berbasis nomor urut, paket pertama sebagai jangkar | Base station tidak dapat menghitung paket yang tidak pernah sampai. Penomoran urut adalah satu-satunya cara menaksir jumlah terkirim pada tautan tanpa acknowledgement. Paket tanpa GPS fix tetap disimpan agar kehilangan tidak lenyap dari penyebut. Batas: taksiran bias ke atas bila paket terakhir hilang, dan perilaku penghitung saat node reboot belum diverifikasi. |
+| P06 | Latensi | Model jumlah Time on Air ditambah waktu proses, hasil simulasi median 753,5 ms (Subbab 4.5) | Diukur: waktu paket tersimpan dikurangi waktu GPS, dilaporkan P50 dan P95 | Terukur langsung dari data nyata tanpa instrumen tambahan. Besaran ini mencakup juga waktu tunggu dan pemrosesan, jadi merupakan batas atas bagi latensi tautan: bila lolos 15 detik, spesifikasi lolos. Tidak dibandingkan langsung dengan 753,5 ms karena besarannya berbeda. Batas: butuh jam laptop sinkron. |
+| P07 | Perencana relay | Simulasi pada terrain sintetis | Perencana pada DEM GeoTIFF nyata: 40 sampel per tautan, kriteria 60 persen zona Fresnel pertama, algoritma greedy, posisi dapat digeser manual | C-251 sendiri menyatakan terrain sintetis sebagai keterbatasan dan menjadwalkan data nyata pada Capstone 2. Hasil jujur: bila macet, perencana melaporkan alasannya (`stall_reason`) dan tidak memaksakan relay. Batas: hanya memodelkan medan tanpa vegetasi, sehingga hasil cenderung optimistis di hutan. |
+| P08 | Sesi pendakian | Tanpa identitas pendaki | Check-in dan check-out per perangkat, satu sesi aktif per perangkat | Portable node dipinjamkan berulang. Tanpa sesi, jejak dua perjalanan bercampur sehingga deteksi diam dan GPX menjadi salah. Tim SAR membutuhkan koordinat yang terkait orang yang bisa dihubungi. Batas: menyimpan data pribadi dan belum ada autentikasi. |
+| P09 | Alarm otomatis | Alarm darurat hanya dari tombol SOS manual | Ditambah alarm stagnan otomatis | Argumen C-251 terhadap radio HT (korban harus sadar) berlaku sama terhadap tombol manual. Radius bawaan 50 m dipilih sebagai dua kali batas galat GPS vegetasi C-251 (25 m). Itu penalaran awal yang masuk akal, tetapi belum divalidasi dengan data lapangan. Batas: pendaki yang beristirahat panjang akan memicu alarm, artinya "perlu dicek" bukan "darurat pasti". Jendela waktu belum terkalibrasi. |
+| P10 | Kalibrasi propagasi | Dijadwalkan sebagai agenda Capstone 2 (Subbab 11.2) | Panel RSSI terhadap jarak dengan estimasi n dan sigma | Menjalankan agenda tersebut. Hanya paket langsung, karena RSSI adalah besaran per tautan. Batas: syarat minimum titik bukan jaminan keandalan statistik, dan n cenderung ditaksir terlalu kecil akibat galat jarak GPS. |
+| P11 | Konfigurasi perangkat | Tidak ada mekanisme mengubah parameter setelah fabrikasi | Antrean konfigurasi dari dashboard ke base lewat bridge, validasi SF 5 sampai 11 | Duty cycle dinamis dan SF adalah parameter kendali di C-251, dan mengubahnya tanpa memprogram ulang node dibutuhkan di lapangan. Batas SF berasal dari chip LLCC68 yang tidak mendukung SF12. Batas: dukungan firmware belum ada (lihat bagian Push Konfigurasi). |
+| P12 | Ekspor GPX | Integrasi platform eksternal di luar lingkup | Ekspor jejak sesi dan rencana relay ke berkas GPX | GPX adalah format tukar standar untuk perangkat navigasi dan aplikasi peta. Ekspor berkas membawa koordinat ke alur kerja SAR tanpa integrasi online yang dikecualikan C-251. |
+| P13 | Node basi | Indikator status komunikasi tiap node | Ditandai "tidak terdengar" bila tidak ada paket lebih dari 120 detik | Empat kali interval lapor. Bila kehilangan paket saling bebas dan PDR 80 persen, empat paket beruntun hilang berpeluang 0,16 persen, jadi alarm palsu jarang tetapi tetap cepat. Batas: kehilangan paket nyata cenderung beruntun, jadi asumsi bebas belum terverifikasi. |
+
+### Pemetaan ke spesifikasi C-251
+
+Ambang spesifikasi tidak diubah. Kolom terakhir menunjukkan seberapa jauh dashboard dapat mengukurnya.
+
+| No | Spesifikasi | Ambang C-251 | Sumber ukur di dashboard | Status alat ukur |
+|---|---|---|---|---|
+| 1 | Jangkauan | 1000 m LOS, 300 m NLOS | Jarak ke base dan RSSI per paket | Tersedia (tautan langsung) |
+| 2 | PDR | 90 persen LOS, 80 persen NLOS | Penghitung paket hilang | Tersedia, bias ke atas |
+| 3 | Latensi | 15 detik (1 hop), 30 detik (2 hop) | Umur data, P50 dan P95 | Tersedia, 2 hop belum |
+| 4 | Akurasi GPS | 10 m terbuka, 25 m vegetasi | Dihitung offline terhadap titik referensi | Dashboard hanya menampilkan satelit dan HDOP |
+| 5 | Pembaruan dashboard | 60 detik | Selisih waktu simpan dan waktu GPS | Sebagian (waktu render di peramban belum dicatat) |
+| 6 | Tombol SOS | Tampil dalam 30 detik, 90 persen dari 20 uji | Tidak ada | Tidak tersedia (field SOS belum ada) |
+| 7 | Daya relay | Rata-rata sekitar 66 mW, sekitar 7 hari | Tidak ada | Di luar dashboard, baterai tidak terkirim |
+
+## Alur Data dan Stack
+
+1. Portable node mengirim paket LoRa. Base station menerima dan mencetak baris `CSV_DATA` ke USB serial.
+2. Bridge Python di komputer host mem-parse baris itu dan menyisipkannya ke PostgreSQL.
+3. Trigger basis data menempelkan paket ke sesi aktif dan memanggil `pg_notify`.
+4. Backend (FastAPI) menerima notifikasi dan menyiarkannya lewat Server-Sent Events (SSE).
+5. Peramban menerima pembaruan lewat `EventSource`. Aksi dari pengguna (check-in, setup, acknowledge) memakai REST.
+
+Bridge berjalan di host, bukan di Docker, karena membutuhkan akses ke port serial.
+
+- Backend: FastAPI, asyncpg (SQL langsung, bukan ORM), APScheduler.
+- Basis data: PostgreSQL 16 dengan PostGIS dan TimescaleDB (`positions` berupa hypertable, koordinat bertipe `geography`).
+- Frontend: Vue 3, Vite, Pinia, MapLibre GL JS. Disajikan nginx pada port 8080.
+- Real-time: posisi dan alarm lewat SSE yang didorong `pg_notify` (bukan WebSocket). Diagnostik tautan (PDR, latensi, node basi, packet log) di-poll dashboard tiap 5 detik (`App.vue`), karena status "basi" memang perlu dihitung ulang berkala walau tidak ada paket baru.
+- Deployment: Docker Compose dengan 3 layanan (`db`, `backend`, `frontend`).
+
+## Menjalankan
+
+Prasyarat: Docker dan Docker Compose. Di Windows disarankan Docker Desktop dengan WSL2. Peramban harus mendukung WebGL.
+
+### Mulai cepat (setelah clone)
+
+```bash
+git clone <url-repositori> silacak
+cd silacak
+cp backend/.env.example backend/.env
+docker compose up --build
+```
+
+Di PowerShell, ganti baris `cp` dengan `copy backend\.env.example backend\.env`.
+
+Berkas `backend/.env` wajib ada karena `docker-compose.yml` membacanya (`env_file`). Isi bawaan `.env.example` sudah cukup untuk pengembangan lokal. Berkas `.env` tidak ikut Git.
+
+Setelah layanan `db` sehat dan `backend` berjalan:
+
+| Layanan | Alamat |
+|---|---|
+| Dashboard | http://localhost:8080 |
+| API dan dokumentasi Swagger | http://localhost:8000/docs |
+| Cek kesehatan | http://localhost:8000/health |
+
+Peta topo offline baru tersedia setelah ada lokasi. Langkah berikutnya:
+
+1. Buka http://localhost:8080, panel Setup, tab "Lokasi dan relay".
+2. Unggah `samples/bukit_klangon.tif` (DEM contoh yang ikut di repositori). Backend membuat ubin 3D dan peta topo offline, jadi tunggu sampai prosesnya selesai. Bila gagal, pesan alasannya tampil di Setup.
+3. Setelah peta topo muncul, lanjut dengan penentuan base dan jalur (bagian Cara Penggunaan, langkah A.3 dan seterusnya), lalu isi data sintetis (bagian Data Sintetis) bila belum ada hardware.
+
+DEM contoh mencakup area sekitar 28 x 28 km, jauh lebih luas daripada anjuran potongan 4 x 4 km di bagian Cara Penggunaan. Prosesnya tetap jalan, hanya lebih lama dan menghasilkan lebih banyak ubin daripada DEM yang dipotong sempit.
+
+### Memuat DEM contoh lewat skrip (opsional)
+
+Untuk demo atau pengujian cepat tanpa membuka peramban, DEM contoh dapat dimuat lewat skrip yang memakai pipeline yang sama persis dengan unggah di Setup:
+
+```bash
+docker compose exec backend python scripts/load_sample_site.py
+```
+
+Opsi: path GeoTIFF lain sebagai argumen (di dalam container, folder `samples/` ada di `/app/samples/`), `--name` untuk nama lokasi, dan `--force`. Skrip menolak jalan bila sudah ada lokasi siap, karena begitu lokasi baru aktif backend menghapus berkas lokasi lama di `data/sites/`. Tanpa `--force`, tidak ada yang terhapus. Backend harus sudah pernah start supaya tabel `sites` ada.
+
+Bila `docker-compose.yml` baru diperbarui (penambahan volume `samples`), jalankan `docker compose up -d` agar container backend dibuat ulang dengan volume itu.
+
+### Folder `data/` dan `samples/`
+
+Folder `data/` di root proyek dipasang ke container backend dan dipakai untuk menyimpan DEM serta ubin peta hasil unggahan di halaman Setup (`data/sites/<id>/`). Folder ini harus dapat ditulis. Di Linux, folder yang dibuat Docker bisa dimiliki root. Bila unggah DEM gagal karena izin, ubah kepemilikan folder tersebut.
+
+Isi `data/` tidak ikut Git (lihat `.gitignore`), kecuali `data/.gitkeep` yang menjaga folder tetap ada. Alasannya: isinya hasil olahan yang dibuat ulang otomatis dari DEM, ukurannya ratusan megabita, dan hanya berguna bila ada baris lokasi yang cocok di basis data. Basis data tersimpan di volume Docker lokal, jadi menyalin `data/sites/` dari komputer lain tidak memunculkan peta. Pakai unggah di Setup atau skrip di atas.
+
+Folder `samples/` berisi DEM contoh dan ikut Git. Folder ini dipasang read-only di `/app/samples` pada container backend.
+
+Reset basis data dari nol (menghapus semua data):
+
+```bash
+docker compose down -v
+docker compose up --build
+```
+
+Skema basis data dibuat oleh `infra/postgres/init.sql` pada inisialisasi pertama, lalu dilengkapi dan dimigrasikan otomatis oleh `backend/app/core/schema.py` setiap backend start.
+
+### Mode pengembangan frontend
+
+```bash
+docker compose up db backend
+cd frontend
+npm install
+npm run dev
+```
+
+Vite berjalan di http://localhost:5173 dan meneruskan `/api` ke http://localhost:8000.
+
+## Cara Penggunaan
+
+### A. Persiapan lokasi (sekali per lokasi uji)
+
+1. Buka dashboard, lalu buka panel Setup dan pilih tab "Lokasi dan relay".
+2. Unggah satu berkas DEM GeoTIFF (untuk mencoba, pakai `samples/bukit_klangon.tif`). Backend menormalkan ke EPSG:4326, membuat ubin elevasi untuk 3D dan ubin topo offline. DEM tanpa CRS ditolak bila koordinatnya bukan derajat. Setelah selesai, peta dasar topo offline tersedia. Setelah lokasi baru aktif, berkas lokasi sebelumnya di `data/sites/` dihapus (barisnya di basis data tetap sebagai riwayat).
+3. Aktifkan mode penempatan base lalu klik titik base station di peta.
+4. Aktifkan mode jalur lalu klik titik-titik jalur pendakian di peta. Tersedia tombol undo titik dan hapus trail.
+5. Isi parameter perencana bila perlu (frekuensi, tinggi antena, jarak hop maksimum, radius dan langkah pencarian, jumlah relay maksimum), lalu klik "Simpan dan hitung ulang".
+6. Rencana relay dihitung setelah base dan minimal dua titik jalur ada. Bila base langsung menjangkau seluruh jalur, dashboard menyatakan relay tidak diperlukan. Bila perencana macet, pesan alasannya ditampilkan. Selama panel Setup terbuka, penanda relay dapat digeser di peta dan margin tiap tautan dihitung ulang dari DEM.
+7. Rencana relay dapat diekspor ke GPX.
+
+Catatan: frekuensi bawaan perencana adalah 915 MHz. Samakan dengan kanal aktual E220 (rancangan awal memakai 923 MHz).
+
+**Menyiapkan berkas DEM.**
+
+- Format GeoTIFF satu band, nilai elevasi dalam meter (rentang yang diterima -500 sampai 9000 m). Batas unggah 200 MB (`client_max_body_size` di `frontend/nginx.conf`).
+- Potong (clip) sekecil mungkin di sekitar jalur, dengan margin sekitar 1,5 km dari jalur untuk ruang cari relay. Untuk Bukit Klangon, kotak sekitar 4 x 4 km sudah cukup. Area yang lebih luas hanya memperlambat pembuatan ubin dan menambah penyimpanan. Pembuat ubin menurunkan zoom maksimum otomatis bila jumlah ubin melebihi 4.000.
+- Contoh dengan GDAL (`-projwin` urutannya barat, utara, timur, selatan): `gdal_translate -projwin W N E S -co COMPRESS=DEFLATE sumber.tif clip.tif`. Di QGIS: Raster, Extraction, Clip Raster by Extent.
+- Ukuran piksel bukan resolusi spasial. DEM yang diunduh pada piksel 8 m bisa berasal dari sumber 30 m yang di-resample, sehingga detailnya tidak lebih halus dari sumbernya. Periksa sumber aslinya (Copernicus GLO-30, DEMNAS, dan sebagainya) dan laporkan resolusi sumber, bukan ukuran piksel berkas. Untuk analisis LOS dan Fresnel sejauh 1 sampai 2 km, DEM 30 m cukup menangkap punggungan dan lembah yang menentukan.
+- Setelah `docker compose down -v`, catatan lokasi (base, jalur, rencana) di basis data ikut terhapus walau berkas DEM masih ada di `data/sites/`. Kosongkan isi `data/sites/` (agar tidak tersisa ubin lama, karena nomor lokasi dimulai lagi dari 1), lalu unggah ulang DEM di Setup dan tentukan lagi base dan jalur.
+
+### B. Mendaftarkan perangkat
+
+1. Di panel Setup, buka tab "Perangkat".
+2. Isi Node ID (sama dengan `node_id` pada firmware, 1 sampai 254), peran (`tracker`, `relay`, atau `base`), nama, dan konfigurasi (interval lapor, daya, SF), lalu simpan.
+3. Perangkat berperan `tracker` otomatis dipetakan ke kode pendaki `H01`, `H02`, dan seterusnya sesuai Node ID.
+
+### C. Menyalakan penerimaan data
+
+Colokkan base station ke USB, pastikan layanan Docker berjalan, lalu jalankan bridge (lihat bagian Menghubungkan Base Station). Posisi muncul di peta setiap kali paket diterima.
+
+### D. Check-in pendaki
+
+1. Buka panel "sesi pendakian" (terlipat secara bawaan, klik untuk membuka).
+2. Isi kode alat (mis. H01), nama pendaki, kontak darurat (opsional), dan jalur (opsional), lalu klik "Mulai sesi".
+3. Bila sebuah alat mengirim data tetapi belum di-check-in, muncul banner "Belum check-in" dengan tautan "isi data". Sesi dibuka otomatis dan ditandai `auto_opened` agar datanya tidak terbuang. Lengkapi datanya dari banner tersebut.
+
+### E. Memantau
+
+Panel monitoring memiliki empat tab:
+
+| Tab | Isi |
+|---|---|
+| hikers | Daftar pendaki dan detail pendaki terpilih (RSSI, hop, satelit dan HDOP, lencana "gps invalid" dan "tidak terdengar"). |
+| links | Ringkasan tautan per pendaki: rute, hop, RSSI, jarak ke base, PDR, latensi P50 dan P95, jumlah paket tanpa fix atau GPS invalid. Klik satu baris untuk memilih pendaki. |
+| log | Packet log pendaki terpilih (daftar 60 paket terakhir) dan grafik RSSI terhadap jarak ke base. Grafik dan estimasi n dan sigma memakai hingga 300 paket terakhir sesi itu (batas `fetchPackets`). |
+| sos | Daftar alarm aktif dan yang sudah di-acknowledge. |
+
+Kartu "pdr sesi" di panel ringkasan menggabungkan seluruh sesi aktif dengan rumus PDR yang sama. Kartu "latency e2e" menampilkan median dari P50 tiap sesi aktif (dalam detik). Jarak ke base hanya muncul bila titik base sudah di-set di Setup.
+
+### F. Menangani alarm
+
+Alarm baru memunculkan overlay bersuara. Peramban memblokir suara otomatis sebelum ada interaksi, jadi klik satu kali di halaman setelah dibuka agar suara dapat berbunyi. Klik acknowledge setelah ditangani. Ingat bahwa alarm stagnan berarti "perlu dicek".
+
+### G. Check-out dan ekspor
+
+Klik "Check-out" pada sesi aktif untuk menutupnya. Jejak setiap sesi, aktif maupun riwayat, dapat diunduh lewat "Unduh GPX".
+
+### H. Pengambilan data untuk kalibrasi dan uji tautan
+
+1. Pastikan titik base sudah di-set dan jam laptop sinkron (NTP).
+2. Check-in perangkat uji, lalu bergerak menjauhi base pada jalur terbuka dengan jarak yang bervariasi.
+3. Kumpulkan sesedikit-dikitnya beberapa ratus paket. Sebagai gambaran, agar batas bawah selang kepercayaan Wilson 95 persen untuk PDR melampaui 90 persen saat PDR terukur 95 persen, dibutuhkan sekitar 140 paket.
+4. Lihat tab "log": estimasi n dan sigma muncul bila ada minimal 5 titik langsung dengan rentang jarak yang cukup lebar. Angka itu valid hanya untuk lokasi uji. Karena grafik memakai paket 300 terakhir, ambil angka n dan sigma sebelum sesi melewati 300 paket, atau tangkap lewat `GET /api/v1/diagnostics/{kode}/packets?limit=500` bila butuh data lebih panjang.
+
+## Menghubungkan Base Station
+
+```bash
+pip install pyserial asyncpg
+python reference-for-hardware-team/serial_to_postgres_bridge.py --port COM5
+```
+
+Opsi:
+
+| Opsi | Keterangan |
+|---|---|
+| `--port` | Port serial base station. Dipilih otomatis bila hanya ada satu port. |
+| `--baud` | Baud rate, bawaan 115200. |
+| `--database-url` | URL koneksi PostgreSQL. Bawaan `postgresql://silacak:silacak@localhost:5432/silacak`, dapat diganti lewat variabel lingkungan `DATABASE_URL`. |
+| `--also-csv` | Menyimpan juga salinan CSV sebagai cadangan lapangan. |
+| `--no-ack` | Menganggap konfigurasi sudah `acked` begitu baris `CFG` ditulis ke serial. Lihat bagian Push Konfigurasi. |
+
+Hal yang perlu diketahui:
+
+- Format yang diterima adalah baris `CSV_DATA` dengan 18 field setelah penanda. Bridge menerima baris dengan field lebih banyak (field tambahan diabaikan dan ada satu peringatan), tetapi menolak baris dengan field kurang. Urutan field ada di `FIELDNAMES` pada berkas bridge.
+- `node_id` pada firmware dipetakan ke `hiker_code` berformat `H01`, `H02`, dan seterusnya. Node yang di halaman Setup didaftarkan sebagai relay atau base tidak diperlakukan sebagai pendaki.
+- Paket tanpa GPS fix tetap disimpan dengan `location` kosong (NULL). Validitas GPS dihitung sebagai: ada koordinat, jumlah satelit minimal 4, dan HDOP paling besar 5.
+- `recorded_at` diisi dari waktu GPS (`gps_utc`) bila tersedia dan masuk akal (tahun 2024 ke atas). Bila tidak, bridge memakai waktu saat paket diterima dan paket itu tidak dihitung dalam statistik latensi.
+- Kolom `battery_pct` akan selalu kosong sampai firmware mengirim data baterai.
+- Sinkronkan jam laptop (NTP) sebelum mengukur latensi.
+- Bridge harus tetap berjalan agar data masuk dan agar konfigurasi dari dashboard terkirim.
+
+## Mengakses Basis Data
+
+Kredensial bawaan: database `silacak`, pengguna `silacak`, kata sandi `silacak`. Ganti sebelum dipakai di luar satu laptop tertutup.
+
+Dari dalam container (tanpa memasang apa pun di host):
+
+```bash
+docker compose exec db psql -U silacak -d silacak
+```
+
+Dari host, dengan `psql` atau aplikasi GUI seperti DBeaver:
+
+```bash
+psql postgresql://silacak:silacak@localhost:5432/silacak
+```
+
+Untuk aplikasi GUI isi host `localhost`, port `5432`, database `silacak`, pengguna dan kata sandi `silacak`.
+
+Dari komputer lain (misalnya bridge berjalan di PC yang mencolok ke base station, sementara Docker di laptop lain): ganti `localhost` dengan alamat IP laptop yang menjalankan Docker, mis. `--database-url postgresql://silacak:silacak@192.168.1.10:5432/silacak`. Port 5432 harus terjangkau dan tidak diblokir firewall. Hal ini membuka basis data ke jaringan, jadi baca bagian Keamanan lebih dulu.
+
+Tabel utama: `hikers`, `hiking_sessions`, `positions` (hypertable), `alerts`, `sites`, `devices`, `device_commands`.
+
+Pertanyaan yang berguna saat pengujian pertama:
+
+```sql
+-- 20 paket terakhir beserta status fix
+SELECT sequence, recorded_at, received_at, rssi_dbm, hop_count, route_path,
+       satellites, hdop, gps_valid, gps_flags, time_from_gps,
+       location IS NOT NULL AS ada_fix
+FROM positions ORDER BY recorded_at DESC LIMIT 20;
+
+-- ragam isi gps_flags dari firmware dan hubungannya dengan gps_valid
+SELECT gps_flags, gps_valid, count(*) FROM positions GROUP BY 1, 2 ORDER BY 3 DESC;
+
+-- sesi terbaru
+SELECT id, status, checked_in_at, checked_out_at FROM hiking_sessions ORDER BY id DESC LIMIT 10;
+
+-- alarm yang masih aktif
+SELECT * FROM alerts WHERE status = 'ACTIVE';
+
+-- status konfigurasi perangkat (selaras bila config_version sama dengan pushed_version)
+SELECT node_id, name, role, config_version, pushed_version FROM devices;
+```
+
+Cara membersihkan data uji: `docker compose down -v`. Perintah ini menghapus seluruh isi basis data (posisi, sesi, alarm, perangkat, dan catatan lokasi). Berkas DEM dan ubin di folder `data/` tidak terhapus, tetapi karena catatan lokasinya hilang, DEM harus diunggah ulang di Setup (kosongkan dulu isi `data/sites/`).
+
+## Push Konfigurasi ke Perangkat
+
+Yang dimaksud di sini adalah konfigurasi radio (interval lapor, daya, SF) yang didorong dari dashboard. Kode firmware ESP32 tidak ada di repositori ini dan tidak dikirim lewat dashboard.
+
+Alur:
+
+1. Di Setup, tab "Perangkat", ubah konfigurasi lalu simpan. Versi konfigurasi naik dan perangkat ditandai belum sinkron.
+2. Klik "Push" pada perangkat (atau tombol push untuk semua perangkat yang belum sinkron). Dashboard menaruh perintah berstatus `pending` di tabel `device_commands`.
+3. Bridge memeriksa antrean setiap 2 detik dan menulis satu baris ke port serial base station:
+   `CFG,<node_id>,<nama>,<peran>,<interval_lapor_detik>,<daya_dBm>,<sf>,<versi>`
+4. Bila firmware membalas `CFG_ACK,<node_id>,<versi>`, status menjadi `acked` dan perangkat dianggap sinkron. Tanpa balasan, status berhenti di `sent`. Dengan opsi `--no-ack`, status langsung `acked` begitu baris ditulis.
+
+Peringatan penting:
+
+- Format `CFG` adalah usulan. Firmware belum tentu mengenalinya, dan belum tentu base meneruskannya ke node tujuan. Status `acked` dengan `--no-ack` tidak membuktikan perangkat menerima konfigurasi. Jangan memakai fitur ini sebagai satu-satunya cara mengubah parameter di lapangan sebelum dukungan firmware dipastikan.
+- Validasi di backend: SF 5 sampai 11, interval lapor 5 sampai 3600 detik, daya 2 sampai 20 dBm. Rentang daya itu belum diselaraskan dengan level daya diskrit modul E220.
+
+Untuk tim hardware, hal yang perlu dipastikan:
+
+- Apakah base mengenali baris `CFG`, atau sesuaikan fungsi `build_cfg_line()` di bridge dengan format perintah yang sudah ada di firmware.
+- Apakah base meneruskan konfigurasi ke node tujuan, dan apakah node membalas `CFG_ACK`.
+- Cara membangun dan mengunggah firmware ke ESP32 mengikuti petunjuk repositori hardware (`Hadware_Programing-main`). Bagian itu tidak dicakup dokumen ini.
+
+## Diagnostik Tautan: Definisi dan Batasan
+
+| Besaran | Definisi | Batasan |
+|---|---|---|
+| PDR sesi | PDR = (N - 1) / ((N - 1) + hilang), dengan N jumlah paket diterima. Paket pertama menjadi jangkar (tidak dihitung sebagai diterima maupun hilang). "Hilang" adalah jumlah `missing_since_previous` mulai paket kedua. | Nilai hilang dihitung oleh firmware base, bukan oleh dashboard. Kehilangan beruntun di akhir sesi tidak terdeteksi, sehingga taksiran cenderung terlalu tinggi. Perilaku penghitung saat node reboot belum diverifikasi. |
+| Latensi | Waktu paket tersimpan di basis data dikurangi waktu GPS pada paket. Dilaporkan sebagai P50 dan P95 per sesi, dalam detik. | Hanya paket dengan waktu dari GPS. Selisih jam laptop terhadap UTC masuk langsung ke hasil. Nilai negatif berarti jam tidak sinkron. Besaran ini memuat juga waktu tunggu sebelum pengiriman dan pemrosesan di sisi base. |
+| Node basi | Tidak ada paket baru lebih dari 120 detik (empat kali interval lapor bawaan 30 detik). | Ambang bersifat tetap di `backend/app/api/v1/diagnostics.py` (`STALE_AFTER_S`) dan perlu disesuaikan bila interval lapor diubah. |
+| RSSI vs jarak | Hanya paket langsung (0 hop). Regresi RSSI terhadap log10 jarak memerlukan sedikitnya 5 titik dengan rasio jarak terjauh terhadap terdekat minimal 1,5. Titik dengan jarak di bawah 10 m dikeluarkan. | RSSI adalah besaran per tautan. Untuk paket via relay, jarak pendaki ke base bukan jarak tautan yang diukur, sehingga paket itu tidak dipakai. Syarat jumlah titik hanyalah syarat minimum agar regresi terdefinisi, bukan jaminan keandalan statistik. |
+
+Akurasi GPS tidak dihitung di dashboard. Dashboard hanya menampilkan jumlah satelit dan HDOP. Hitung galat posisi secara offline terhadap titik referensi.
+
+## Konfigurasi
+
+Berkas `backend/.env` (salin dari `backend/.env.example`, berkas `.env` tidak ikut Git). Setelah mengubahnya, buat ulang container backend: `docker compose up -d --force-recreate backend`.
+
+| Variabel | Bawaan | Keterangan |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://silacak:silacak@db:5432/silacak` | Koneksi basis data dari dalam Docker. |
+| `STAGNANT_WINDOW_MINUTES` | 180 | Lama jendela deteksi stagnan. |
+| `STAGNANT_RADIUS_M` | 50 | Radius dianggap tidak berpindah. |
+| `STAGNANT_CHECK_INTERVAL_MINUTES` | 2 | Seberapa sering pemeriksaan dijalankan. |
+| `CORS_ORIGINS` | `localhost:5173` dan `localhost:8080` | Asal yang diizinkan. |
+
+Nilai deteksi stagnan adalah nilai awal dan belum dikalibrasi dengan data lapangan. Untuk menguji alarm dengan cepat, turunkan jendela menjadi 1 sampai 2 menit.
+
+## Data Sintetis (Pengembangan)
+
+Untuk mengembangkan dashboard tanpa hardware:
+
+```bash
+docker compose exec backend python scripts/seed_synthetic_data.py
+```
+
+Skrip mensimulasikan tiga pendaki: H01 dan H02 bergerak di sepanjang jalur, sedangkan H03 sengaja diam untuk menguji alarm stagnan. Jalur mengikuti lokasi aktif di halaman Setup bila ada. Bila tidak ada, dipakai `TRAIL_WAYPOINTS` bawaan yang koordinatnya hanya perkiraan, bukan hasil digitasi GPX asli.
+
+Keterbatasan seeder saat ini: skrip tidak mengisi `missing_since_previous`, `time_from_gps`, dan `gps_valid`. Akibatnya dengan data sintetis kartu PDR selalu 100 persen, latensi kosong (tampil sebagai strip), dan status GPS tidak pernah invalid. Panel itu baru bermakna dengan data dari bridge, atau setelah seeder diperbarui (lihat G14).
+
+Peringatan: data sintetis masuk ke basis data yang sama dengan data nyata dan memakai kode perangkat yang sama (H01 dan seterusnya). Sebelum pengujian dengan hardware, kosongkan basis data dengan `docker compose down -v`.
+
+Skrip `backend/scripts/plan_relays.py` menjalankan perencana relay dari terminal. Preset `ft_ugm` memakai elevasi sintetis hanya untuk membuktikan kode berjalan, bukan untuk validasi propagasi. Preset `bukit_klangon` membaca DEM dari variabel lingkungan `DEM_PATH` (bawaan `/app/data/sites/1/dem.tif`, yaitu DEM hasil unggah di Setup):
+
+```bash
+docker compose exec backend python scripts/plan_relays.py ft_ugm
+docker compose exec backend python scripts/plan_relays.py bukit_klangon
+# bila lokasi aktif bukan nomor 1:
+docker compose exec -e DEM_PATH=/app/data/sites/2/dem.tif backend python scripts/plan_relays.py bukit_klangon
+```
+
+## Struktur Folder
+
+```
+.gitignore                   berkas yang tidak ikut Git (.env, isi data/, cache)
+docker-compose.yml
+backend/
+  Dockerfile, requirements.txt
+  .env, .env.example         konfigurasi (lihat bagian Konfigurasi); .env tidak ikut Git
+  app/
+    main.py                  titik masuk, startup basis data, listener, penjadwal, /health
+    core/                    config, pool basis data, penjadwal, schema.py (migrasi otomatis)
+    api/v1/                  rute: hikers, positions, alerts, gpx, terrain, sites,
+                             sessions, devices, diagnostics, stream
+    services/                stagnant_detector, notifier, gpx_exporter,
+                             dem_ingest, terrain_planner
+    repositories/            lapisan SQL (asyncpg)
+    schemas/                 model Pydantic
+  scripts/                   seed_synthetic_data.py, plan_relays.py, load_sample_site.py
+frontend/
+  Dockerfile, index.html, package.json, vite.config.js (proxy /api ke :8000 saat dev)
+  src/
+    main.js, App.vue         pemasangan aplikasi, tata letak, polling diagnostik
+    components/              MapView, MonitoringPanel, WorkspacePanel, SetupPanel,
+                             SessionsPanel, SosOverlay, RssiScatter, GpxExportButton
+                             (_AlertPanel.vue dan _HikerList.vue adalah sisa versi lama,
+                             tidak diimpor di mana pun, aman dihapus)
+    stores/                  Pinia: hikers, alerts, sessions, devices, site, diagnostics
+    composables/             useLiveStream (EventSource)
+    services/api.js
+  nginx.conf                 meneruskan /api ke backend dengan proxy_buffering off (wajib untuk SSE)
+infra/postgres/
+  Dockerfile                 build PostGIS ditambah TimescaleDB lewat apt
+  init.sql                   skema awal, ekstensi, trigger
+reference-for-hardware-team/
+  serial_to_postgres_bridge.py, README.md
+samples/
+  bukit_klangon.tif          DEM contoh untuk diunggah di Setup (ikut Git)
+data/
+  .gitkeep                   penjaga folder; isi lain dibuat otomatis dan tidak ikut Git
+                             (data/sites/<id>/ berisi DEM dan ubin hasil unggahan)
+```
+
+### Yang tidak ikut Git
+
+| Jalur | Alasan |
+|---|---|
+| `backend/.env` | Konfigurasi lokal. Salin dari `backend/.env.example`. |
+| `data/*` (kecuali `data/.gitkeep`) | Hasil olahan DEM yang dibuat ulang otomatis, ratusan megabita, dan hanya terpakai bila ada baris lokasi di basis data. |
+| `node_modules/`, `frontend/dist/` | Hasil `npm install` dan build. |
+| `__pycache__/`, `*.pyc`, `.venv/` | Cache dan lingkungan Python. |
+
+### API ringkas
+
+Seluruh rute berada di bawah `/api/v1`. Dokumentasi lengkap tersedia di `/docs`.
+
+| Kelompok | Fungsi |
+|---|---|
+| `hikers`, `positions` | Daftar pendaki, posisi terakhir, jejak. |
+| `sessions` | Check-in, check-out, daftar sesi, jejak per sesi. |
+| `alerts` | Daftar alarm dan acknowledge. |
+| `diagnostics` | Ringkasan per sesi aktif dan packet log per perangkat. |
+| `devices` | Perangkat, konfigurasi, push, dan antrean perintah. |
+| `sites` | Lokasi aktif, unggah DEM, input, posisi relay, rencana, ekspor GPX rencana. |
+| `gpx` | Ekspor jejak per sesi atau per perangkat. |
+| `stream` | Aliran SSE untuk pembaruan real-time. |
+| `terrain` | `GET /terrain/profile` belum diimplementasikan dan mengembalikan 501. Perencanaan relay ada di `sites`. |
+
+## Keamanan
+
+Sistem ini dirancang untuk satu laptop tertutup di basecamp. Sebelum dipakai di luar kondisi itu:
+
+- Tidak ada autentikasi dan tidak ada enkripsi. Siapa pun yang dapat membuka port 8080 atau 8000 dapat membaca dan mengubah data.
+- Kredensial basis data adalah bawaan (`silacak` untuk pengguna dan kata sandi) dan port 5432 terbuka ke host. Ganti kredensial dan tutup port bila ada akses dari luar.
+- Sesi menyimpan nama, nomor telepon, kontak darurat, dan riwayat posisi, yang termasuk data pribadi. Belum ada kebijakan retensi dan persetujuan pendaki.
+- Pembatasan koneksi per origin pada HTTP/1.1 (umumnya enam) membatasi jumlah tab dashboard yang terbuka bersamaan karena SSE.
+- Penyiaran SSE berada di memori satu proses, cukup untuk satu basecamp.
+
+## Batasan yang Diketahui
+
+Butir berikut tidak dibela sebagai perubahan karena belum memenuhi C-251.
+
+| ID | Kesenjangan | Dampak | Penutupan |
+|---|---|---|---|
+| G01 | Tidak ada penanda SOS manual pada `CSV_DATA` | Spesifikasi 6 tidak dapat diuji | Firmware menambah field SOS di belakang baris. Bridge sudah menoleransi field tambahan. |
+| G02 | Tidak ada data baterai | `battery_pct` selalu kosong, spesifikasi 7 tidak terpantau | Firmware menambah pengukuran tegangan baterai |
+| G03 | Tidak ada SNR | Analisis margin tautan tidak lengkap | Firmware menambah field SNR dari modul radio (periksa dulu apakah E220 mengeksposnya) |
+| G04 | Hanya satu nilai RSSI per paket | Kalibrasi tautan via relay belum mungkin | Firmware relay meneruskan RSSI per hop |
+| G05 | Rekomendasi penyebab error otomatis (C-251 Tabel 6.1) belum ada | Dashboard menampilkan indikator mentah | Tidak dibuat sebelum G03 dan G04 terpenuhi, karena atribusi penyebab tanpa data per hop bersifat spekulasi |
+| G06 | Batasan unik per paket belum diterapkan | Paket ganda (mis. pada mesh) dapat tersimpan dan membiaskan PDR | Tambah indeks unik. Pada hypertable, kolom partisi waktu wajib ikut dalam indeks unik. |
+| G07 | Perencana tanpa model vegetasi | Hasil optimistis di hutan | Tambah margin redaman atau validasi lapangan |
+| G08 | Relay belum dibangun | Uji multi-hop dan latensi 2 hop belum dilakukan | Bangun relay dan ulangi uji |
+| G09 | Frekuensi bawaan perencana 915 MHz (C-251: 923 MHz), validasi daya 2 sampai 20 dBm | Selisih radius Fresnel sekitar 0,44 persen, tidak mengubah kesimpulan | Samakan dengan kanal aktual E220 dan level daya diskrit modul |
+| G10 | Peta jalan OSM offline lokal belum ada | Tanpa internet hanya peta topo | Unduh ubin OSM area uji ke penyimpanan lokal |
+| G11 | Waktu render di peramban tidak dicatat | Spesifikasi 5 hanya terukur sampai penyimpanan | Catat waktu tiba SSE di klien atau ukur manual |
+| G12 | Parameter alarm stagnan belum terkalibrasi | Alarm palsu belum terukur | Kalibrasi dari data lapangan |
+| G13 | Salinan baca-saja untuk pihak eksternal belum ada | Pihak luar belum dapat melihat daftar pendaki | Di luar lingkup versi ini |
+| G14 | Seeder tidak mengisi `missing_since_previous`, `time_from_gps`, `gps_valid` | Panel PDR, latensi, dan status GPS tidak teruji dengan data sintetis | Perbarui seeder: simulasikan paket hilang, waktu GPS, dan fix buruk sesekali |
+
+Tambahan: hasil pengujian di satu lokasi tidak dapat diekstrapolasi ke lokasi lain tanpa kalibrasi ulang.
+
+## Langkah Selanjutnya
+
+Urutan disarankan dari yang paling mendesak.
+
+### 1. Verifikasi pertama (sekarang, tanpa hardware tambahan)
+
+- [ ] `docker compose up --build` berhasil, `/health` menjawab, dan skema termigrasi (cek tabel `positions` memiliki kolom `gps_valid`, `gps_flags`, `time_from_gps`).
+- [ ] Unggah `samples/bukit_klangon.tif` di Setup (atau jalankan `scripts/load_sample_site.py`) dan pastikan peta topo offline muncul.
+- [ ] Jalankan data sintetis, pastikan peta, sesi, dan alarm stagnan berfungsi, lalu `docker compose down -v` untuk membersihkan. Ingat bahwa PDR dan latensi tidak teruji oleh seeder saat ini (G14).
+- [ ] Sambungkan base station, jalankan bridge, dan cek dengan SQL (bagian Mengakses Basis Data) bahwa paket masuk. Perhatikan isi `gps_flags` dan apakah ada nilai yang menandai fix tidak valid. Bila ada, sesuaikan aturan `gps_valid` di bridge.
+- [ ] Sinkronkan jam laptop (NTP).
+- [ ] Verifikasi apakah `missing_since_previous` terisi dengan benar. Bila selalu 0, PDR akan terbaca 100 persen dan tidak berarti.
+
+### 2. Pengujian yang sudah bisa dilakukan dengan base dan satu portable node
+
+- [ ] Uji tautan langsung: PDR (target sesi minimal 100 paket, ideal sekitar 140 atau lebih), jangkauan, dan kalibrasi n serta sigma pada jalur terbuka.
+- [ ] Uji akurasi GPS statis: kumpulkan sampel pada titik referensi, hitung galat offline.
+- [ ] Uji latensi dan waktu pembaruan, dengan jam yang sinkron.
+- [ ] Uji alarm stagnan dengan jendela diperpendek, lalu kembalikan ke nilai bawaan.
+- [ ] Catat konfigurasi radio aktual (kanal atau frekuensi, SF, BW, daya) dan versi firmware yang dipakai.
+
+### 3. Membutuhkan perubahan hardware atau firmware
+
+- [ ] Tambah field SOS, baterai, dan SNR pada `CSV_DATA` (G01 sampai G03). Setelah itu perbarui `FIELDNAMES` dan perintah `INSERT` di bridge, serta buat alarm `MANUAL_SOS` dan `LOW_BATTERY` dari bridge. Tipe alarm sudah tersedia di basis data dan tampilan overlay sudah ada.
+- [ ] Pastikan firmware mengenali baris `CFG` dan membalas `CFG_ACK`, atau sesuaikan `build_cfg_line()`.
+- [ ] Setelah relay dibangun: RSSI per hop (G04), heartbeat relay agar statusnya terlihat, lalu ulangi uji multi-hop dan latensi 2 hop.
+
+### 4. Perangkat lunak
+
+- [ ] Terapkan indeks unik paket (G06).
+- [ ] Samakan frekuensi perencana dengan kanal aktual dan selaraskan validasi daya (G09).
+- [ ] Tambah margin vegetasi pada perencana (G07).
+- [ ] Unduh ubin OSM offline area uji (G10) dan catat waktu render di klien (G11).
+- [ ] Sebelum dipakai di luar satu laptop tertutup: autentikasi, enkripsi, ganti kredensial, dan kebijakan retensi data pribadi.
+- [ ] Tambah pengujian otomatis (minimal untuk parser bridge, perhitungan PDR, dan deteksi stagnan).
+
+### 5. Dokumentasi
+
+- [ ] Perbarui draf C-601 dengan hasil uji (semua penanda `[ISI]`), lalu cocokkan register perubahan dengan kondisi akhir kode.
+- [ ] Siapkan bukti kontribusi dari riwayat Git (commit dan blame) untuk bab kontribusi individu.
+
+## Pemecahan Masalah
+
+| Gejala | Kemungkinan penyebab dan langkah |
+|---|---|
+| `docker compose up` gagal karena `backend/.env` tidak ditemukan | Berkas itu tidak ikut Git. Salin dari contoh: `cp backend/.env.example backend/.env`. |
+| Peta topo tidak muncul setelah clone baru | Basis data masih kosong. Lokasi dibaca dari tabel `sites`, jadi berkas di `data/` saja tidak cukup. Unggah `samples/bukit_klangon.tif` di Setup atau jalankan `docker compose exec backend python scripts/load_sample_site.py`. |
+| `load_sample_site.py` melapor "Berkas tidak ditemukan" | Volume `samples` belum terpasang di container. Jalankan `docker compose up -d` agar container dibuat ulang, dan pastikan folder `samples/` ada di root repositori. |
+| Posisi tidak muncul padahal bridge berjalan | Baca keluaran bridge: baris dengan kurang dari 18 field ditolak. Cek apakah Node ID itu didaftarkan sebagai `relay` atau `base` di Setup (paketnya diabaikan). Cek dengan SQL bagian Mengakses Basis Data. |
+| Marker diam di lokasi lama dan ada lencana "gps invalid" | Paket terbaru tanpa fix atau Nsat di bawah 4 atau HDOP di atas 5. Marker tetap di lokasi fix terakhir. Itu perilaku yang dirancang. |
+| Dashboard tidak memperbarui sama sekali | Pastikan diakses lewat nginx (port 8080) dan `proxy_buffering off` tidak diubah. Tutup tab yang tidak perlu (batas sekitar enam koneksi SSE per origin). Lihat `docker compose logs backend`. |
+| "pdr sesi" selalu 100 persen | `missing_since_previous` selalu 0 atau kosong (firmware belum mengisinya, atau data berasal dari seeder, lihat G14). |
+| Latensi kosong atau negatif | Kosong: paket tanpa waktu GPS (tahun di bawah 2024) tidak dihitung. Negatif: jam laptop tidak sinkron. Sinkronkan NTP. |
+| Jarak ke base tampil sebagai strip | Titik base belum di-set di Setup, atau paket itu tanpa fix. |
+| DEM berstatus error setelah unggah | Pesan alasannya tampil di Setup. Backend yang mati saat memproses menandai error saat start berikutnya. Unggah ulang. Bila gagal karena izin, periksa kepemilikan folder `data/`. |
+| Konfigurasi perangkat berhenti di `sent` | Firmware tidak membalas `CFG_ACK`. Lihat bagian Push Konfigurasi. |
+| Alarm muncul tanpa suara | Peramban memblokir audio sebelum ada interaksi. Klik halaman sekali. |
+| Perubahan `backend/.env` tidak berlaku | Buat ulang container: `docker compose up -d --force-recreate backend`. |
+
+## Catatan Teknis
+
+- Layanan `db` dibuat dari `infra/postgres/Dockerfile` (basis `postgis/postgis`, TimescaleDB ditambahkan lewat apt), bukan dari image siap pakai `timescale/timescaledb-ha`. Image itu sempat gagal mengubah izin folder data pada Docker Desktop for Windows (WSL2).
+- Penjadwal memakai `misfire_grace_time=30` detik. Nilai bawaan satu detik membuat pemeriksaan alarm sering terlewat akibat timer jitter di Docker.
+- Proses DEM yang terputus karena backend mati ditandai galat pada startup berikutnya, agar tidak terlihat memproses selamanya.
+- Perubahan skema dilakukan lewat `schema.py` (idempotent). Berkas `init.sql` hanya berlaku pada inisialisasi pertama volume basis data.
+- Koordinat bawaan pada peta dan data sintetis diarahkan ke Bukit Klangon (Cangkringan, Sleman) sebagai perkiraan dari sumber online, bukan hasil digitasi GPX. Bila jalur target berada di kawasan taman nasional, pastikan izin masuk dan status akses jalur terbaru sebelum uji lapangan.

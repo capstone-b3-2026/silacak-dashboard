@@ -1,0 +1,20 @@
+backend/.env
+
+# Hasil olahan DEM (dibuat otomatis lewat Setup). Folder dijaga oleh data/.gitkeep
+data/*
+!data/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Frontend
+node_modules/
+frontend/dist/
+
+# Editor dan sistem operasi
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
