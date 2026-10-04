@@ -46,7 +46,7 @@ Dokumen ini hanya membahas bagian perangkat lunak (dashboard, backend, basis dat
 - Alarm "stagnan" otomatis bila pendaki berada dalam radius tertentu selama jendela waktu tertentu. Alarm dapat di-acknowledge dari dashboard dan memicu overlay bersuara.
 - Diagnostik tautan per sesi aktif: PDR, latensi, status GPS, jarak ke base, status node basi, dan packet log.
 - Grafik RSSI terhadap jarak ke base untuk paket langsung (0 hop), dengan estimasi eksponen redaman lintasan n dan simpangan baku shadowing sigma.
-- Halaman Setup: unggah DEM GeoTIFF, tentukan posisi base dan jalur, jalankan perencana penempatan relay (analisis garis pandang dan zona Fresnel), geser posisi relay secara manual, dan ekspor rencana ke GPX.
+- Halaman Setup: unggah DEM GeoTIFF, tentukan posisi base dan jalur, jalankan perencana penempatan relay (pencarian optimal berbasis redaman difraksi pada DEM), geser posisi relay secara manual, dan ekspor rencana ke GPX.
 - Ekspor jejak sesi ke GPX.
 - Manajemen perangkat dan antrean konfigurasi (SF, interval lapor, daya) yang dikirim bridge ke port serial.
 
@@ -76,7 +76,7 @@ Nomor subbab C-251 di bawah dirujuk dari draf C-601. Cocokkan dengan dokumen C-2
 | P04 | Skema paket | Payload konseptual: ID, koordinat, timestamp, baterai, RSSI, SNR, SOS | 18 field `CSV_DATA` dari firmware nyata | Ditambahkan nomor urut, rute dan jumlah hop, kecepatan, satelit, HDOP, penanda GPS, penghitung paket hilang, dan waktu GPS. Semuanya dibutuhkan oleh kriteria C-251 sendiri (validitas GPS, membedakan paket langsung dan relay, PDR, latensi). Baterai, SNR, dan SOS tidak ada pada firmware saat ini. Itu kesenjangan, bukan perubahan yang dibela. |
 | P05 | PDR | Diterima dibagi dikirim (Subbab 2.5.1) | Dihitung dari penghitung paket hilang berbasis nomor urut, paket pertama sebagai jangkar | Base station tidak dapat menghitung paket yang tidak pernah sampai. Penomoran urut adalah satu-satunya cara menaksir jumlah terkirim pada tautan tanpa acknowledgement. Paket tanpa GPS fix tetap disimpan agar kehilangan tidak lenyap dari penyebut. Batas: taksiran bias ke atas bila paket terakhir hilang, dan perilaku penghitung saat node reboot belum diverifikasi. |
 | P06 | Latensi | Model jumlah Time on Air ditambah waktu proses, hasil simulasi median 753,5 ms (Subbab 4.5) | Diukur: waktu paket tersimpan dikurangi waktu GPS, dilaporkan P50 dan P95 | Terukur langsung dari data nyata tanpa instrumen tambahan. Besaran ini mencakup juga waktu tunggu dan pemrosesan, jadi merupakan batas atas bagi latensi tautan: bila lolos 15 detik, spesifikasi lolos. Tidak dibandingkan langsung dengan 753,5 ms karena besarannya berbeda. Batas: butuh jam laptop sinkron. |
-| P07 | Perencana relay | Simulasi pada terrain sintetis | Perencana pada DEM GeoTIFF nyata: 40 sampel per tautan, kriteria 60 persen zona Fresnel pertama, algoritma greedy, posisi dapat digeser manual | C-251 sendiri menyatakan terrain sintetis sebagai keterbatasan dan menjadwalkan data nyata pada Capstone 2. Hasil jujur: bila macet, perencana melaporkan alasannya (`stall_reason`) dan tidak memaksakan relay. Batas: hanya memodelkan medan tanpa vegetasi, sehingga hasil cenderung optimistis di hutan. |
+| P07 | Perencana relay | Simulasi pada terrain sintetis | Perencana pada DEM GeoTIFF nyata: jalur dirapatkan tiap 40 m, kelayakan tautan memakai redaman difraksi knife-edge (dB), pencarian optimal (jumlah relay minimum lalu biaya terendah), anggaran daya tautan, vegetasi dari raster kanopi opsional, kalibrasi dari RSSI lapangan, posisi dapat digeser manual | C-251 sendiri menyatakan terrain sintetis sebagai keterbatasan dan menjadwalkan data nyata pada Capstone 2. Hasil jujur: bila macet, perencana melaporkan alasannya (`stall_reason`) dan tidak memaksakan relay. Batas: angka mutlak RSSI baru bermakna setelah dikalibrasi, dan vegetasi hanya dihitung bila raster kanopi diunggah. |
 | P08 | Sesi pendakian | Tanpa identitas pendaki | Check-in dan check-out per perangkat, satu sesi aktif per perangkat | Portable node dipinjamkan berulang. Tanpa sesi, jejak dua perjalanan bercampur sehingga deteksi diam dan GPX menjadi salah. Tim SAR membutuhkan koordinat yang terkait orang yang bisa dihubungi. Batas: menyimpan data pribadi dan belum ada autentikasi. |
 | P09 | Alarm otomatis | Alarm darurat hanya dari tombol SOS manual | Ditambah alarm stagnan otomatis | Argumen C-251 terhadap radio HT (korban harus sadar) berlaku sama terhadap tombol manual. Radius bawaan 50 m dipilih sebagai dua kali batas galat GPS vegetasi C-251 (25 m). Itu penalaran awal yang masuk akal, tetapi belum divalidasi dengan data lapangan. Batas: pendaki yang beristirahat panjang akan memicu alarm, artinya "perlu dicek" bukan "darurat pasti". Jendela waktu belum terkalibrasi. |
 | P10 | Kalibrasi propagasi | Dijadwalkan sebagai agenda Capstone 2 (Subbab 11.2) | Panel RSSI terhadap jarak dengan estimasi n dan sigma | Menjalankan agenda tersebut. Hanya paket langsung, karena RSSI adalah besaran per tautan. Batas: syarat minimum titik bukan jaminan keandalan statistik, dan n cenderung ditaksir terlalu kecil akibat galat jarak GPS. |
@@ -195,8 +195,8 @@ Vite berjalan di http://localhost:5173 dan meneruskan `/api` ke http://localhost
 2. Unggah satu berkas DEM GeoTIFF (untuk mencoba, pakai `samples/bukit_klangon.tif`). Backend menormalkan ke EPSG:4326, membuat ubin elevasi untuk 3D dan ubin topo offline. DEM tanpa CRS ditolak bila koordinatnya bukan derajat. Setelah selesai, peta dasar topo offline tersedia. Setelah lokasi baru aktif, berkas lokasi sebelumnya di `data/sites/` dihapus (barisnya di basis data tetap sebagai riwayat).
 3. Aktifkan mode penempatan base lalu klik titik base station di peta.
 4. Aktifkan mode jalur lalu klik titik-titik jalur pendakian di peta. Tersedia tombol undo titik dan hapus trail.
-5. Isi parameter perencana bila perlu (frekuensi, tinggi antena, jarak hop maksimum, radius dan langkah pencarian, jumlah relay maksimum), lalu klik "Simpan dan hitung ulang".
-6. Rencana relay dihitung setelah base dan minimal dua titik jalur ada. Bila base langsung menjangkau seluruh jalur, dashboard menyatakan relay tidak diperlukan. Bila perencana macet, pesan alasannya ditampilkan. Selama panel Setup terbuka, penanda relay dapat digeser di peta dan margin tiap tautan dihitung ulang dari DEM.
+5. Isi parameter perencana bila perlu (arti tiap parameter ada di bagian [Perencana Relay](#perencana-relay)), lalu klik "Simpan dan hitung ulang".
+6. Rencana relay dihitung setelah base dan minimal dua titik jalur ada. Bila base langsung menjangkau seluruh jalur, dashboard menyatakan relay tidak diperlukan. Bila perencana macet, pesan alasannya ditampilkan. Selama panel Setup terbuka, penanda relay dapat digeser di peta dan redaman tiap tautan dihitung ulang dari DEM dengan model yang sama dengan perencana.
 7. Rencana relay dapat diekspor ke GPX.
 
 Catatan: frekuensi bawaan perencana adalah 915 MHz. Samakan dengan kanal aktual E220 (rancangan awal memakai 923 MHz).
@@ -252,6 +252,81 @@ Klik "Check-out" pada sesi aktif untuk menutupnya. Jejak setiap sesi, aktif maup
 2. Check-in perangkat uji, lalu bergerak menjauhi base pada jalur terbuka dengan jarak yang bervariasi.
 3. Kumpulkan sesedikit-dikitnya beberapa ratus paket. Sebagai gambaran, agar batas bawah selang kepercayaan Wilson 95 persen untuk PDR melampaui 90 persen saat PDR terukur 95 persen, dibutuhkan sekitar 140 paket.
 4. Lihat tab "log": estimasi n dan sigma muncul bila ada minimal 5 titik langsung dengan rentang jarak yang cukup lebar. Angka itu valid hanya untuk lokasi uji. Karena grafik memakai paket 300 terakhir, ambil angka n dan sigma sebelum sesi melewati 300 paket, atau tangkap lewat `GET /api/v1/diagnostics/{kode}/packets?limit=500` bila butuh data lebih panjang.
+
+### Perencana Relay
+
+Perencana mencari posisi dan jumlah relay yang menjangkau **seluruh jalur** dengan relay sesedikit mungkin, lalu memilih yang paling andal. Kode: `backend/app/services/terrain_planner.py` (`suggest_relay_chain`, `evaluate_relay_chain`, `predict_links`). Versi greedy lama masih ada sebagai `*_greedy` untuk pembanding. Kalibrasi dari RSSI lapangan ada di `backend/app/services/link_calibration.py`.
+
+**Model tautan** (semua dalam dB):
+
+```
+RSSI prediksi = P_tx + G_a + G_b - FSPL(d, f) - L_medan - L_vegetasi - offset_kalibrasi
+margin fading = RSSI prediksi - sensitivitas
+tautan layak  = L_medan <= redaman medan maks  DAN  margin fading >= margin fading yang disyaratkan  DAN  d <= hop maks
+```
+
+- `FSPL` = 32,44 + 20 log10(d km) + 20 log10(f MHz).
+- `L_medan` = redaman difraksi knife-edge (ITU-R P.526) pada rintangan terburuk, dengan medan dinaikkan `cadangan galat DEM`. 0 dB berarti zona Fresnel bebas, sekitar 6 dB berarti garis pandang hanya menyentuh puncak. Sampel dalam 30 m dari kedua ujung tautan tidak dihitung karena DEM tidak menyelesaikan detail setinggi itu. `redaman medan maks` adalah batas kepercayaan model difraksi, bukan anggaran daya.
+- `L_vegetasi` = Weissberger (daun penuh, rumus yang sama dengan C-251): 0,45 f^0,284 d untuk d sampai 14 m, 1,33 f^0,284 d^0,588 untuk 14 sampai 400 m (f dalam GHz, d dalam m). `d` adalah panjang bagian garis pandang yang berada **di dalam kanopi**; kedalaman di atas 400 m dijepit. Butuh raster tinggi kanopi (lihat bawah). Tanpa raster, nilainya 0 dan hasil optimistis di hutan.
+- `offset_kalibrasi` = redaman tambahan dari hasil kalibrasi RSSI lapangan. Bawaan 0.
+- Bawaan P_tx, gain, dan sensitivitas mengikuti C-251 Tabel 10.2 (21 dBm, 5 dBi per antena, -137 dBm untuk SF9). Itu angka **rencana**, bukan hasil ukur.
+
+**Cara mencari:**
+
+1. Jalur dirapatkan menjadi sampel tiap sekitar 40 m. Cakupan dicek di semua sampel, bukan hanya di titik yang diklik.
+2. Kandidat relay adalah koridor di sepanjang jalur (jarak ke jalur sampai `radius cari`) pada grid `langkah cari`. Lereng di atas 35 derajat dibuang. Jumlah kandidat dibatasi sekitar 1.200 (grid dikasarkan otomatis).
+3. Pencarian berlapis menurut jumlah relay (dynamic programming, beam 150). Jumlah relay minimum dijamin selama kandidat per lapis tidak melebihi beam. Di antara solusi dengan jumlah relay sama dipilih biaya terendah: slack tautan ke node induk dan ke jalur, jarak ke jalur, dan kemiringan. Induk relay bisa base atau relay sebelumnya (jaringan bercabang).
+4. Tiap relay digeser halus di sekitar posisi grid (polish) selama semua syarat tetap terpenuhi.
+5. Geser manual di peta dinilai ulang dengan model dan angka yang sama persis.
+
+**Parameter di panel Setup:**
+
+| Parameter | Arti | Catatan |
+|---|---|---|
+| Frekuensi (MHz) | FSPL dan radius Fresnel | 915 dan 923 MHz hanya beda sekitar 0,4 persen. Samakan dengan kanal E220. |
+| Antena pendaki / relay (m) | Tinggi antena | Tiang relay lebih tinggi mengurangi jumlah relay. |
+| Hop maks (km) | Jarak maksimum satu tautan | Bawaan 2 km lebih longgar dari target C-251 (1 km LOS, 300 m NLOS). |
+| Redaman medan maks (dB) | Batas kepercayaan redaman difraksi | Bawaan 6 dB. Menaikkannya menghemat relay tetapi mempercayai model di medan yang makin terhalang. |
+| Cadangan galat DEM (m) | Medan dianggap segini lebih tinggi | Bawaan 1 m. Tombol utama antara hemat relay dan tahan galat DEM. |
+| Daya TX, gain antena, sensitivitas | Anggaran daya | Bawaan dari C-251. Gain adalah gain **bersih** (sudah dikurangi rugi kabel dan konektor). |
+| Margin fading (dB) | Margin di atas sensitivitas yang disyaratkan | Bawaan 10 dB. Saran kalibrasi: 1,28 kali sigma residu. |
+| Skala vegetasi (0 sampai 1) | Pengali redaman vegetasi | 0 mengabaikan vegetasi. Turunkan bila DEM sudah memuat tinggi pohon (lihat peringatan DSM). |
+| Offset kalibrasi (dB) | Redaman tambahan hasil kalibrasi | Diisi tombol "Terapkan saran" atau manual. |
+| Relay maks, radius cari, langkah cari | Batas pencarian | Langkah lebih halus dari sekitar 30 m tidak berguna karena DEM efektif sekitar 30 m. |
+
+**Data vegetasi (opsional tetapi disarankan di area berhutan).** Unggah GeoTIFF **tinggi kanopi dalam meter** di panel Setup bagian 3 (`POST /api/v1/sites/active/canopy`). CRS dan resolusi bebas: berkas direproyeksi ke EPSG:4326 dan resolusi yang lebih halus dari sekitar 10 m dirata-ratakan (membatasi memori). Piksel nodata dianggap 0, area di luar raster dianggap tidak diketahui (dihitung tanpa vegetasi dan dilaporkan sebagai persen jalur yang tercakup). Berkas yang tampak seperti DEM atau kelas tutupan lahan (nilai di luar 0 sampai 150 m) ditolak. Contoh sumber: peta tinggi kanopi global ETH (10 m) atau Meta/WRI (1 m); cek cakupan dan lisensi sebelum dipakai. Data kanopi ikut lokasi: DEM baru berarti unggah ulang.
+
+**Peringatan DSM.** Beberapa DEM adalah model permukaan (DSM) yang sudah memuat tinggi pohon (misalnya Copernicus GLO-30). Bila DEM Anda DSM, pohon terhitung dua kali (di medan dan di vegetasi). Gunakan DEM medan telanjang (DTM) bila ada, atau turunkan `skala vegetasi`. Periksa jenis DEM dari sumber aslinya.
+
+**Kalibrasi dari RSSI lapangan** (panel Setup bagian 5, `GET /api/v1/sites/active/calibration`). Perencana memprediksi RSSI tiap posisi pendaki dari base dengan model yang sama, lalu membandingkannya dengan RSSI terukur dari paket langsung (0 hop, GPS valid, 72 jam terakhir, bisa dibatasi sesi atau jarak maksimum):
+
+- `residu = terukur - prediksi`. Saran offset = offset sekarang dikurangi median residu. Saran margin fading = 1,28 kali sigma residu (sekitar 90 persen paket di atas ambang).
+- `rssi_p01_dbm` (RSSI terendah yang masih diterima) adalah batas atas sensitivitas efektif. Bandingkan dengan parameter sensitivitas.
+- Tombol "Terapkan" hanya aktif bila data andal: minimal 30 paket dan rentang jarak P90/P10 minimal 2. Bila residu berubah lebih dari 8 dB per dekade jarak, offset konstan tidak cukup (eksponen redaman lapangan beda dari model) dan ada peringatan.
+- **Bias sensor:** paket yang hilang tidak punya RSSI, sehingga di tepi jangkauan residu terlihat lebih baik daripada kenyataan. Kalibrasi pada jarak di mana PDR masih tinggi (isi "batas jarak").
+- **Jangan kalibrasi dengan data sintetis.** Seeder menghasilkan RSSI karangan; hasilnya tidak berarti.
+- Setelah menerapkan, jalankan kalibrasi lagi: median residu harus mendekati 0.
+
+**Hasil verifikasi (DEM `bukit_klangon.tif`, 7 jalur uji sintetis, hop 2 km, radius 0,45 km):**
+
+- Semua jalur terjangkau penuh dengan 2 sampai 5 relay. Perencana greedy lama gagal menjangkau penuh 6 dari 7 jalur yang sama (dinilai dengan kriteria baru).
+- Hasil divalidasi dengan penghitung skalar terpisah pada DEM asli, DEM yang dihaluskan ke setara 30 m, dan DEM bergalat acak 3 m: cakupan 100 persen pada dua yang pertama dan paling rendah 99,2 persen pada yang ketiga.
+- Jumlah relay sama dengan pencarian tanpa pemangkasan beam, jadi minimal pada model dan grid kandidat yang sama.
+- Tanpa raster kanopi dan dengan anggaran daya bawaan, hasil identik dengan versi sebelum link budget (posisi relay sama pada 7 dari 7 jalur): anggaran daya bawaan sangat longgar (margin sekitar 80 dB pada 0,5 km), jadi batas yang menentukan adalah redaman medan dan hop maks. Anggaran daya baru menentukan setelah offset kalibrasi dan vegetasi masuk.
+- Perhitungan link divektorkan dicocokkan dengan implementasi skalar terpisah (medan, vegetasi, RSSI): selisih di bawah 1e-13 dB. Titik acuan Weissberger pada 915 MHz: 6,1 dB (14 m), 12,9 dB (50 m), 19,4 dB (100 m), 37,1 dB (300 m).
+- Kalibrasi diuji pada data simulasi dengan kebenaran diketahui (offset 9,0 dB, sigma 5,0 dB): hasil 8,9 dB dan 5,0 dB; setelah diterapkan median residu 0. Uji end-to-end lewat endpoint ke PostgreSQL + PostGIS (paket via relay dan GPS tidak valid diabaikan).
+- Waktu hitung sekitar 2 sampai 3 detik untuk jalur 2,5 km dan 4 sampai 6 detik untuk 5 sampai 8 km (dengan kanopi sekitar 30 persen lebih lama).
+- **Belum diuji:** raster kanopi nyata (uji memakai kanopi sintetis dari DEM), data RSSI nyata, dan tampilan di browser.
+
+**Batasan yang harus dicatat:**
+
+- Angka mutlak RSSI prediksi **tidak dapat dipercaya sebelum dikalibrasi**. Bawaan C-251 (21 dBm, 5 dBi, -137 dBm) kemungkinan optimistis dibanding lapangan; sensitivitas efektif ditentukan dari data (`rssi_p01_dbm`), bukan hanya dari spesifikasi.
+- Rintangan medan dimodelkan sebagai satu tepi pisau pada titik terburuk, tanpa beberapa tepi dan tanpa pantulan tanah.
+- Vegetasi hanya ada bila raster kanopi diunggah dan akurat. Weissberger adalah model empiris; skala vegetasi dan offset kalibrasi adalah tombol penyesuaian.
+- Kualitas hasil dibatasi resolusi efektif DEM (sekitar 30 m pada berkas contoh).
+- Jumlah relay sangat bergantung pada cadangan galat DEM, redaman medan maks, margin fading, dan tinggi relay. Catat nilai yang dipakai di laporan.
+- Medan sangat curam (kerucut puncak Merapi di atas sekitar 2.800 m) bisa membuat perencana berhenti dengan alasan tidak ada kandidat. Pesan di panel menyebut sampai berapa kilometer jalur tercover.
+- Posisi relay hasil perencana adalah titik awal untuk dicoba di lapangan, lalu digeser manual sesuai kondisi sebenarnya.
 
 ## Menghubungkan Base Station
 
@@ -388,7 +463,7 @@ Keterbatasan seeder saat ini: skrip tidak mengisi `missing_since_previous`, `tim
 
 Peringatan: data sintetis masuk ke basis data yang sama dengan data nyata dan memakai kode perangkat yang sama (H01 dan seterusnya). Sebelum pengujian dengan hardware, kosongkan basis data dengan `docker compose down -v`.
 
-Skrip `backend/scripts/plan_relays.py` menjalankan perencana relay dari terminal. Preset `ft_ugm` memakai elevasi sintetis hanya untuk membuktikan kode berjalan, bukan untuk validasi propagasi. Preset `bukit_klangon` membaca DEM dari variabel lingkungan `DEM_PATH` (bawaan `/app/data/sites/1/dem.tif`, yaitu DEM hasil unggah di Setup):
+Skrip `backend/scripts/plan_relays.py` menjalankan perencana relay dari terminal dan mencetak induk, hop, redaman, lereng, dan jarak ke jalur tiap relay. Preset `ft_ugm` memakai elevasi sintetis hanya untuk membuktikan kode berjalan, bukan untuk validasi propagasi. Preset `bukit_klangon` membaca DEM dari variabel lingkungan `DEM_PATH` (bawaan `/app/data/sites/1/dem.tif`, yaitu DEM hasil unggah di Setup):
 
 ```bash
 docker compose exec backend python scripts/plan_relays.py ft_ugm
@@ -411,7 +486,8 @@ backend/
     api/v1/                  rute: hikers, positions, alerts, gpx, terrain, sites,
                              sessions, devices, diagnostics, stream
     services/                stagnant_detector, notifier, gpx_exporter,
-                             dem_ingest, terrain_planner
+                             dem_ingest (DEM + kanopi), terrain_planner (perencana, model tautan),
+                             link_calibration (kalibrasi RSSI lapangan)
     repositories/            lapisan SQL (asyncpg)
     schemas/                 model Pydantic
   scripts/                   seed_synthetic_data.py, plan_relays.py, load_sample_site.py
@@ -486,13 +562,14 @@ Butir berikut tidak dibela sebagai perubahan karena belum memenuhi C-251.
 | G04 | Hanya satu nilai RSSI per paket | Kalibrasi tautan via relay belum mungkin | Firmware relay meneruskan RSSI per hop |
 | G05 | Rekomendasi penyebab error otomatis (C-251 Tabel 6.1) belum ada | Dashboard menampilkan indikator mentah | Tidak dibuat sebelum G03 dan G04 terpenuhi, karena atribusi penyebab tanpa data per hop bersifat spekulasi |
 | G06 | Batasan unik per paket belum diterapkan | Paket ganda (mis. pada mesh) dapat tersimpan dan membiaskan PDR | Tambah indeks unik. Pada hypertable, kolom partisi waktu wajib ikut dalam indeks unik. |
-| G07 | Perencana tanpa model vegetasi | Hasil optimistis di hutan | Tambah margin redaman atau validasi lapangan |
+| G07 | Vegetasi hanya dihitung bila raster tinggi kanopi diunggah | Tanpa raster, hasil optimistis di hutan; DEM berjenis DSM menghitung pohon dua kali | Unggah kanopi, periksa jenis DEM, validasi lapangan |
 | G08 | Relay belum dibangun | Uji multi-hop dan latensi 2 hop belum dilakukan | Bangun relay dan ulangi uji |
 | G09 | Frekuensi bawaan perencana 915 MHz (C-251: 923 MHz), validasi daya 2 sampai 20 dBm | Selisih radius Fresnel sekitar 0,44 persen, tidak mengubah kesimpulan | Samakan dengan kanal aktual E220 dan level daya diskrit modul |
 | G10 | Peta jalan OSM offline lokal belum ada | Tanpa internet hanya peta topo | Unduh ubin OSM area uji ke penyimpanan lokal |
 | G11 | Waktu render di peramban tidak dicatat | Spesifikasi 5 hanya terukur sampai penyimpanan | Catat waktu tiba SSE di klien atau ukur manual |
 | G12 | Parameter alarm stagnan belum terkalibrasi | Alarm palsu belum terukur | Kalibrasi dari data lapangan |
 | G13 | Salinan baca-saja untuk pihak eksternal belum ada | Pihak luar belum dapat melihat daftar pendaki | Di luar lingkup versi ini |
+| G15 | Angka anggaran daya (daya TX, gain, sensitivitas) masih bawaan C-251 | RSSI prediksi mutlak belum terbukti | Ukur di lapangan, lalu kalibrasi (panel Setup bagian 5) dan verifikasi sensitivitas ke datasheet |
 | G14 | Seeder tidak mengisi `missing_since_previous`, `time_from_gps`, `gps_valid` | Panel PDR, latensi, dan status GPS tidak teruji dengan data sintetis | Perbarui seeder: simulasikan paket hilang, waktu GPS, dan fix buruk sesekali |
 
 Tambahan: hasil pengujian di satu lokasi tidak dapat diekstrapolasi ke lokasi lain tanpa kalibrasi ulang.
@@ -528,7 +605,8 @@ Urutan disarankan dari yang paling mendesak.
 
 - [ ] Terapkan indeks unik paket (G06).
 - [ ] Samakan frekuensi perencana dengan kanal aktual dan selaraskan validasi daya (G09).
-- [ ] Tambah margin vegetasi pada perencana (G07).
+- [ ] Unggah raster tinggi kanopi lokasi uji dan pastikan jenis DEM (DTM atau DSM) (G07).
+- [ ] Setelah ada RSSI lapangan: jalankan kalibrasi (panel Setup bagian 5), terapkan saran offset dan margin fading, lalu hitung ulang rencana relay (G15). Catat nilai sebelum dan sesudah di laporan.
 - [ ] Unduh ubin OSM offline area uji (G10) dan catat waktu render di klien (G11).
 - [ ] Sebelum dipakai di luar satu laptop tertutup: autentikasi, enkripsi, ganti kredensial, dan kebijakan retensi data pribadi.
 - [ ] Tambah pengujian otomatis (minimal untuk parser bridge, perhitungan PDR, dan deteksi stagnan).

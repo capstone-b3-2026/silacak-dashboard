@@ -21,7 +21,7 @@ from rasterio.transform import from_bounds
 from rasterio.warp import Resampling, calculate_default_transform, reproject
 from scipy.ndimage import gaussian_filter, map_coordinates
 
-from app.services.terrain_planner import ElevationSource
+from app.services.terrain_planner import ClutterSource, ElevationSource
 
 TILE = 256
 MAX_TILES = 4000  # pengaman: DEM terlalu luas -> turunin zoom maksimum otomatis
@@ -252,3 +252,110 @@ class GridElevation(ElevationSource):
         if r < 0 or c < 0 or r > h - 1 or c > w - 1:
             raise ValueError(f"Titik ({lat:.5f}, {lon:.5f}) di luar cakupan DEM.")
         return float(map_coordinates(self._a, [[r], [c]], order=1)[0])
+
+    def elevation_many(self, lats, lons):
+        """Bilinear untuk banyak titik sekaligus (divektorkan). Di luar DEM -> NaN."""
+        lats = np.asarray(lats, dtype=float)
+        lons = np.asarray(lons, dtype=float)
+        c = (lons - self._left) / self._rx - 0.5
+        r = (self._top - lats) / self._ry - 0.5
+        h, w = self._a.shape
+        ok = (r >= 0) & (c >= 0) & (r <= h - 1) & (c <= w - 1)
+        out = np.full(lats.shape, np.nan)
+        if ok.any():
+            out[ok] = map_coordinates(self._a, [r[ok], c[ok]], order=1)
+        return out
+
+
+# ─────────────────────────── kanopi / vegetasi (opsional) ───────────────────────────
+CANOPY_TARGET_RES_M = 10.0  # raster kanopi yang lebih halus dirata-ratakan ke ~10 m (batasi memori)
+CANOPY_MAX_PLAUSIBLE_M = 150.0
+
+
+def normalize_canopy(src_path: str, dst_path: str) -> dict:
+    """Raster TINGGI KANOPI (meter) apa pun (CRS apa pun, resolusi apa pun) -> GeoTIFF EPSG:4326 float32.
+    Piksel nodata di dalam raster dianggap 0 (tidak ada vegetasi); area di luar raster disimpan NaN
+    (= tidak diketahui, dihitung sebagai 0 oleh perencana dan dilaporkan sebagai cakupan)."""
+    notes: list[str] = []
+    with rasterio.open(src_path) as src:
+        crs = src.crs
+        if crs is None:
+            b = src.bounds
+            if -180 <= b.left < b.right <= 180 and -90 <= b.bottom < b.top <= 90:
+                crs = CRS.from_epsg(4326)
+                notes.append("File tidak punya CRS; koordinatnya derajat, dianggap EPSG:4326.")
+            else:
+                raise ValueError("File tidak punya CRS dan koordinatnya bukan derajat lat/lon. Set CRS-nya dulu.")
+        data = src.read(1).astype("float32")
+        if src.nodata is not None:
+            data[data == src.nodata] = np.nan
+        data[~np.isfinite(data)] = np.nan
+        valid = data[~np.isnan(data)]
+        if valid.size == 0:
+            raise ValueError("Semua piksel raster kanopi kosong (nodata).")
+        if float(valid.min()) < -1 or float(valid.max()) > CANOPY_MAX_PLAUSIBLE_M:
+            raise ValueError(
+                f"Rentang nilai tidak masuk akal untuk tinggi kanopi dalam meter ({valid.min():.0f}..{valid.max():.0f}). "
+                "Berkas ini mungkin DEM atau kelas tutupan lahan, bukan tinggi kanopi.")
+        data = np.where(np.isnan(data), 0.0, np.clip(data, 0.0, None)).astype("float32")
+
+        lat_mid = (src.bounds.top + src.bounds.bottom) / 2
+        target_deg = CANOPY_TARGET_RES_M / (111320.0 * math.cos(math.radians(lat_mid)))
+        if crs.to_epsg() != 4326:
+            notes.append(f"CRS {crs.to_string()} direproyeksi ke EPSG:4326.")
+        transform, w, h = calculate_default_transform(crs, "EPSG:4326", src.width, src.height, *src.bounds)
+        if abs(transform.a) < target_deg:  # lebih halus dari ~10 m -> kasarkan
+            scale = target_deg / abs(transform.a)
+            transform, w, h = calculate_default_transform(
+                crs, "EPSG:4326", src.width, src.height, *src.bounds, resolution=target_deg)
+            notes.append(f"Resolusi dirata-ratakan ke ~{CANOPY_TARGET_RES_M:.0f} m (faktor {scale:.1f}).")
+        arr = np.full((h, w), np.nan, dtype="float32")
+        reproject(
+            data, arr, src_transform=src.transform, src_crs=crs, dst_transform=transform, dst_crs="EPSG:4326",
+            resampling=Resampling.average, src_nodata=None, dst_nodata=np.nan,
+        )
+    left, top = transform.c, transform.f
+    right, bottom = left + transform.a * w, top + transform.e * h
+    with rasterio.open(
+        dst_path, "w", driver="GTiff", height=h, width=w, count=1, dtype="float32", crs=CRS.from_epsg(4326),
+        transform=from_bounds(left, bottom, right, top, w, h), compress="lzw", nodata=float("nan"),
+    ) as dst:
+        dst.write(arr, 1)
+    ok = ~np.isnan(arr)
+    res_m = abs(transform.a) * 111320 * math.cos(math.radians((top + bottom) / 2))
+    return {
+        "bounds": [left, bottom, right, top], "res_m": round(res_m, 1), "width": w, "height": h,
+        "max_height_m": round(float(np.nanmax(arr)), 1), "mean_height_m": round(float(np.nanmean(arr)), 1),
+        "canopy_pct": round(float(100.0 * np.mean(arr[ok] >= 2.0)), 1), "notes": notes,
+    }
+
+
+class GridClutter(ClutterSource):
+    """Tinggi kanopi (m) dari raster ter-normalisasi (EPSG:4326), nearest-neighbour. Di luar raster -> NaN."""
+
+    active = True
+
+    def __init__(self, path: str):
+        with rasterio.open(path) as s:
+            self._a = s.read(1).astype("float32")
+            self._left, self._top = s.bounds.left, s.bounds.top
+            self._rx, self._ry = s.res
+        self.bounds = [self._left, self._top - self._a.shape[0] * self._ry, self._left + self._a.shape[1] * self._rx, self._top]
+
+    def canopy_many(self, lats, lons):
+        lats = np.asarray(lats, dtype=float)
+        lons = np.asarray(lons, dtype=float)
+        c = np.floor((lons - self._left) / self._rx)
+        r = np.floor((self._top - lats) / self._ry)
+        h, w = self._a.shape
+        ok = np.isfinite(c) & np.isfinite(r) & (r >= 0) & (c >= 0) & (r < h) & (c < w)
+        out = np.full(lats.shape, np.nan)
+        if ok.any():
+            out[ok] = self._a[r[ok].astype(int), c[ok].astype(int)]
+        return out
+
+
+def load_clutter(folder: str):
+    """GridClutter dari <folder>/canopy.tif bila ada, selain itu None (tanpa data vegetasi)."""
+    p = os.path.join(folder, "canopy.tif")
+    return GridClutter(p) if os.path.exists(p) else None

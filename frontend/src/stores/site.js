@@ -1,5 +1,8 @@
 import { defineStore } from "pinia";
-import { fetchActiveSite, uploadDem, saveSiteInputs, computeRelayPlan, dismissFailedUpload, saveRelayPositions } from "../services/api";
+import {
+  fetchActiveSite, uploadDem, saveSiteInputs, computeRelayPlan, dismissFailedUpload, saveRelayPositions,
+  uploadCanopy, deleteCanopy, fetchCalibration,
+} from "../services/api";
 
 export const useSiteStore = defineStore("site", {
   state: () => ({
@@ -7,6 +10,8 @@ export const useSiteStore = defineStore("site", {
     showSetup: false,
     editMode: null, // null | "base" | "trail" -> klik peta buat nambah titik
     busy: false, // upload / hitung lagi jalan
+    calibration: null, // hasil GET /sites/active/calibration (saran offset & margin fading)
+    calibrating: false,
     error: null,
     _timer: null,
     _planTimer: null,
@@ -53,6 +58,53 @@ export const useSiteStore = defineStore("site", {
       } finally {
         this.busy = false;
       }
+    },
+    // Data kanopi berubah -> rencana lama basi: simpan ulang input (backend menilai ulang posisi manual / hitung otomatis)
+    async uploadCanopyFile(file) {
+      this.error = null;
+      this.busy = true;
+      try {
+        await uploadCanopy(file);
+        await this.loadActive();
+      } catch (e) {
+        this.error = e.message;
+        return;
+      } finally {
+        this.busy = false;
+      }
+      await this.saveInputs();
+    },
+    async removeCanopy() {
+      this.busy = true;
+      try {
+        await deleteCanopy();
+        await this.loadActive();
+      } catch (e) {
+        this.error = e.message;
+        return;
+      } finally {
+        this.busy = false;
+      }
+      await this.saveInputs();
+    },
+    async calibrate({ maxKm = null } = {}) {
+      this.error = null;
+      this.calibrating = true;
+      try {
+        this.calibration = await fetchCalibration({ maxKm });
+      } catch (e) {
+        this.error = e.message;
+      } finally {
+        this.calibrating = false;
+      }
+    },
+    async applyCalibration() {
+      const c = this.calibration;
+      if (!c?.reliable) return;
+      this.site.params.calib_offset_db = c.suggested_calib_offset_db;
+      if (c.suggested_fade_margin_db != null) this.site.params.fade_margin_db = c.suggested_fade_margin_db;
+      this.calibration = null; // sudah dipakai; hitung ulang untuk memeriksa (bias harus ~0)
+      await this.saveInputs();
     },
     inBounds(lat, lon) {
       const b = this.site?.dem_info?.bounds;

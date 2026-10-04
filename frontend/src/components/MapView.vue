@@ -353,16 +353,17 @@ function siteGeo() {
   trail.forEach(([la, lo]) => f.push({ type: "Feature", properties: { kind: "pt" }, geometry: { type: "Point", coordinates: [lo, la] } }));
   const relays = st?.plan?.relays || [];
   if (st?.base && relays.length) {
-    let prev = [st.base.lon, st.base.lat];
-    for (const r of relays) {
-      const cur = [r.lon, r.lat];
+    // titik[0] = base, titik[k] = relay ke-k; r.parent = node induk (0 = base). Rencana lama tanpa
+    // `parent` = rantai berurutan.
+    const nodes = [[st.base.lon, st.base.lat], ...relays.map((r) => [r.lon, r.lat])];
+    relays.forEach((r, i) => {
+      const loss = r.loss_db ?? (r.margin_m < 3 ? 6 : 0); // rencana lama hanya punya margin
       f.push({
         type: "Feature",
-        properties: { kind: "link", color: r.link_ok === false ? "#d04a4a" : r.margin_m < 3 ? "#c8883a" : "#5aaa5a" },
-        geometry: { type: "LineString", coordinates: [prev, cur] },
+        properties: { kind: "link", color: r.link_ok === false ? "#d04a4a" : (r.fade_margin_db != null ? r.fade_margin_db < (st.params?.fade_margin_db ?? 10) : loss > 3) ? "#c8883a" : "#5aaa5a" },
+        geometry: { type: "LineString", coordinates: [nodes[r.parent ?? i], nodes[i + 1]] },
       });
-      prev = cur;
-    }
+    });
   }
   return { type: "FeatureCollection", features: f };
 }
@@ -391,7 +392,7 @@ function syncSite() {
     const broken = r.link_ok === false;
     siteMarkers.push(siteMarker(
       `R${r.n}`, broken ? "relay broken" : "relay", r.lon, r.lat,
-      `Relay ${r.n} · ${r.elev_m} m · hop ${r.hop_km} km · margin ${r.margin_m} m${broken ? " · LINK PUTUS" : ""}${canDrag ? " · geser untuk memindah" : ""}`,
+      `Relay ${r.n} · ${r.elev_m} m · hop ${r.hop_km} km · ${r.loss_db != null ? `redaman ${(r.loss_db + (r.veg_db ?? 0)).toFixed(1)} dB${r.fade_margin_db != null ? ` · margin ${r.fade_margin_db} dB` : ""}` : `margin ${r.margin_m} m`}${broken ? " · LINK PUTUS" : ""}${canDrag ? " · geser untuk memindah" : ""}`,
       { draggable: canDrag, onDragEnd: (lat, lon) => siteStore.moveRelay(r.n, lat, lon) },
     ));
   }

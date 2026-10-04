@@ -112,6 +112,24 @@
             <label v-for="f in paramFields" :key="f.k"><span class="lbl">{{ f.label }}</span>
               <input class="inp" type="number" :step="f.step" v-model.number="site.site.params[f.k]" />
             </label>
+            <p class="hint wide"><b>Anggaran daya tautan.</b> Bawaan = angka rencana C-251 (bukan hasil ukur). Isi dari datasheet, lalu <b>kalibrasi dari RSSI lapangan</b> (bagian 5).</p>
+            <label v-for="f in budgetFields" :key="f.k"><span class="lbl">{{ f.label }}</span>
+              <input class="inp" type="number" :step="f.step" v-model.number="site.site.params[f.k]" />
+            </label>
+            <div class="wide canopy">
+              <span class="lbl">Vegetasi (opsional)</span>
+              <template v-if="site.site.canopy">
+                <p class="hint">Raster kanopi dipakai: <b>{{ site.site.canopy.filename || "canopy.tif" }}</b>, {{ site.site.canopy.res_m }} m/piksel,
+                  tinggi maks {{ site.site.canopy.max_height_m }} m, {{ site.site.canopy.canopy_pct }}% area bertajuk,
+                  menutup {{ site.site.canopy.dem_overlap_pct }}% area DEM.</p>
+                <button class="btn sm" :disabled="site.busy" @click="site.removeCanopy()">Hapus data kanopi</button>
+              </template>
+              <template v-else>
+                <p class="hint">Tanpa data kanopi, vegetasi dianggap tidak ada dan hasil di hutan optimistis. Unggah GeoTIFF <b>tinggi kanopi (meter)</b>, mis. dari peta tinggi kanopi global (ETH 10 m atau Meta/WRI 1 m; cek cakupan dan lisensi).</p>
+                <input ref="canopyInput" type="file" accept=".tif,.tiff" hidden @change="onCanopy" />
+                <button class="btn sm" :disabled="site.busy" @click="canopyInput.click()">Unggah raster kanopi</button>
+              </template>
+            </div>
             <button class="btn wide" @click="site.saveInputs()">Simpan &amp; hitung ulang</button>
           </div>
         </section>
@@ -130,23 +148,61 @@
             </button>
             <p v-if="!plan" class="hint">Dihitung otomatis begitu base + minimal 2 titik trail ada.</p>
             <template v-else>
-              <p class="hint">Elevasi base {{ plan.base_elev_m }} m. Margin = ruang bebas di atas 60% zona Fresnel terburuk.</p>
-              <p v-if="plan.relays.length" class="hint">Geser penanda R di peta (selama panel Setup terbuka) sesuai kondisi lapangan; margin tiap link dihitung ulang dari DEM. "Hitung ulang" = kembali ke rekomendasi otomatis.</p>
+              <p class="hint">Elevasi base {{ plan.base_elev_m }} m.<template v-if="plan.trail_km != null"> Jalur {{ plan.trail_km }} km, tercover {{ plan.covered_km }} km<template v-if="plan.coverage_pct != null"> ({{ plan.coverage_pct }}% sampel terjangkau)</template>.</template>
+                <b>Redaman</b> = medan (difraksi) + vegetasi, dalam dB. <b>Margin</b> = RSSI prediksi di atas sensitivitas; hijau bila ≥ {{ site.site?.params?.fade_margin_db ?? 10 }} dB (margin fading yang disyaratkan). Redaman medan maksimum yang dipercaya model: {{ site.site?.params?.max_loss_db ?? 6 }} dB.</p>
+              <p v-if="plan.uses_clutter && plan.clutter_cover_pct != null && plan.clutter_cover_pct < 99.5" class="err">Data kanopi hanya menutup {{ plan.clutter_cover_pct }}% jalur; sisanya dianggap tanpa vegetasi.</p>
+              <p v-else-if="plan.uses_clutter === false" class="hint warnbox">Tanpa data vegetasi: hasil optimistis di area berhutan. Unggah raster tinggi kanopi di bagian 3.</p>
+              <p v-if="plan.relays.length" class="hint">Geser penanda R di peta (selama panel Setup terbuka) sesuai kondisi lapangan; redaman tiap link dihitung ulang dari DEM. "Hitung ulang" = kembali ke rekomendasi otomatis.</p>
               <table class="tbl" v-if="plan.relays.length">
-                <thead><tr><th>#</th><th>Posisi</th><th>Elev</th><th>Hop</th><th>Margin</th></tr></thead>
+                <thead><tr><th>#</th><th>Posisi</th><th>Hop</th><th>Redaman</th><th>Margin</th></tr></thead>
                 <tbody>
                   <tr v-for="r in plan.relays" :key="r.n">
                     <td>R{{ r.n }}</td>
-                    <td>{{ r.lat.toFixed(5) }}, {{ r.lon.toFixed(5) }}</td>
-                    <td>{{ r.elev_m }} m</td>
-                    <td>{{ r.hop_km }} km</td>
-                    <td :class="r.margin_m < 3 ? 'warn' : 'ok'">{{ r.margin_m }} m</td>
+                    <td :title="`elevasi ${r.elev_m} m`">{{ r.lat.toFixed(5) }}, {{ r.lon.toFixed(5) }}</td>
+                    <td :title="`terhubung ke ${r.parent ? 'R' + r.parent : 'base'}`">{{ r.hop_km }} km</td>
+                    <td v-if="r.loss_db != null" :class="r.link_ok === false ? 'warn' : 'ok'"
+                        :title="`medan ${r.loss_db} dB + vegetasi ${r.veg_db ?? 0} dB`">{{ (r.loss_db + (r.veg_db ?? 0)).toFixed(1) }} dB</td>
+                    <td v-else :class="r.margin_m < 3 ? 'warn' : 'ok'" title="rencana lama: margin Fresnel; tekan Hitung ulang">{{ r.margin_m }} m</td>
+                    <td v-if="r.fade_margin_db != null" :class="marginClass(r)" :title="`RSSI prediksi ${r.rssi_dbm} dBm`">{{ r.fade_margin_db }} dB</td>
+                    <td v-else>—</td>
                   </tr>
                 </tbody>
               </table>
               <p v-else-if="plan.covers_all" class="hint">Base langsung menjangkau seluruh trail — tidak perlu relay.</p>
               <p v-if="plan.message" class="err">{{ plan.message }}</p>
               <a class="btn" :href="planGpxUrl" download>Unduh GPX rencana</a>
+            </template>
+          </div>
+        </section>
+
+        <!-- 5. kalibrasi dari RSSI lapangan -->
+        <section class="pnl">
+          <div class="ph"><span class="tl">5 · Kalibrasi RSSI lapangan</span></div>
+          <div class="pb">
+            <p class="hint">Membandingkan RSSI <b>terukur</b> (paket langsung 0 hop, GPS valid, 72 jam terakhir) dengan RSSI <b>prediksi</b> model di posisi yang sama,
+              lalu menyarankan <b>offset kalibrasi</b> dan <b>margin fading</b>. <b>Hanya pakai data lapangan</b>, jangan data sintetis. Kalibrasi pada jarak di mana
+              PDR masih tinggi: paket yang hilang di tepi jangkauan tidak punya RSSI sehingga hasil terlihat terlalu bagus.</p>
+            <label><span class="lbl">Batas jarak (km, opsional)</span>
+              <input class="inp" type="number" step="0.1" v-model.number="calMaxKm" placeholder="semua" />
+            </label>
+            <button class="btn" :disabled="site.calibrating || !site.site.base" @click="site.calibrate({ maxKm: calMaxKm || null })">
+              {{ site.calibrating ? "Menghitung…" : "Hitung dari data lapangan" }}
+            </button>
+            <template v-if="site.calibration">
+              <p v-for="m in site.calibration.problems" :key="m" class="err">{{ m }}</p>
+              <table v-if="site.calibration.n" class="tbl">
+                <tbody>
+                  <tr><td>Paket dipakai</td><td>{{ site.calibration.n }} <template v-if="site.calibration.n_outside_dem">({{ site.calibration.n_outside_dem }} di luar DEM dibuang)</template></td></tr>
+                  <tr><td>Jarak P10–P90</td><td>{{ site.calibration.dist_p10_km }}–{{ site.calibration.dist_p90_km }} km</td></tr>
+                  <tr><td>Bias (terukur − prediksi)</td><td>{{ site.calibration.bias_median_db }} dB</td></tr>
+                  <tr><td>Sigma residu</td><td>{{ site.calibration.sigma_db ?? "—" }} dB</td></tr>
+                  <tr><td>RSSI terendah yang diterima (P1)</td><td>{{ site.calibration.rssi_p01_dbm }} dBm <span class="hint">(sensitivitas efektif tak mungkin lebih baik; sekarang {{ site.calibration.current_sensitivity_dbm }})</span></td></tr>
+                  <tr><td>Saran offset kalibrasi</td><td><b>{{ site.calibration.suggested_calib_offset_db }} dB</b> (sekarang {{ site.calibration.current_offset_db }})</td></tr>
+                  <tr><td>Saran margin fading</td><td><b>{{ site.calibration.suggested_fade_margin_db ?? "—" }} dB</b> (sekarang {{ site.calibration.current_fade_margin_db }})</td></tr>
+                </tbody>
+              </table>
+              <button class="btn primary" :disabled="!site.calibration.reliable || site.busy" @click="site.applyCalibration()">Terapkan saran &amp; hitung ulang</button>
+              <p v-if="site.calibration.n && !site.calibration.reliable" class="hint">Belum bisa diterapkan: data belum cukup andal (lihat catatan di atas).</p>
             </template>
           </div>
         </section>
@@ -224,6 +280,13 @@ const dev = useDeviceStore();
 const tab = ref("site");
 
 // ── lokasi ──
+const canopyInput = ref(null);
+const calMaxKm = ref(null);
+async function onCanopy(e) {
+  const f = e.target.files[0];
+  e.target.value = "";
+  if (f) await site.uploadCanopyFile(f);
+}
 const fileInput = ref(null);
 const picked = ref(null);
 const siteName = ref("");
@@ -232,10 +295,27 @@ const plan = computed(() => site.site?.plan);
 const statusLabel = computed(
   () => ({ processing: "memproses", ready: "siap", error: "gagal" }[site.site?.status] || site.site?.status)
 );
+const budgetFields = [
+  { k: "tx_dbm", label: "Daya TX (dBm)", step: 1 },
+  { k: "sensitivity_dbm", label: "Sensitivitas (dBm)", step: 1 },
+  { k: "gain_hiker_dbi", label: "Gain antena pendaki (dBi)", step: 0.5 },
+  { k: "gain_relay_dbi", label: "Gain antena relay/base (dBi)", step: 0.5 },
+  { k: "fade_margin_db", label: "Margin fading (dB)", step: 0.5 },
+  { k: "veg_scale", label: "Skala vegetasi (0–1)", step: 0.1 },
+  { k: "calib_offset_db", label: "Offset kalibrasi (dB)", step: 0.5 },
+];
+// warna margin fading: merah = link putus, kuning = di bawah margin yang disyaratkan, hijau = cukup
+function marginClass(r) {
+  if (r.link_ok === false) return "warn";
+  return r.fade_margin_db < (site.site?.params?.fade_margin_db ?? 10) ? "warn" : "ok";
+}
 const paramFields = [
   { k: "freq_mhz", label: "Frekuensi (MHz)", step: 1 },
-  { k: "antenna_h_m", label: "Tinggi antena (m)", step: 0.5 },
+  { k: "antenna_h_m", label: "Antena pendaki (m)", step: 0.5 },
+  { k: "relay_h_m", label: "Antena relay (m)", step: 0.5 },
   { k: "max_hop_km", label: "Hop maks (km)", step: 0.1 },
+  { k: "max_loss_db", label: "Redaman medan maks (dB)", step: 0.5 },
+  { k: "dem_error_m", label: "Cadangan galat DEM (m)", step: 0.5 },
   { k: "max_relays", label: "Relay maks", step: 1 },
   { k: "search_radius_km", label: "Radius cari (km)", step: 0.05 },
   { k: "search_step_km", label: "Langkah cari (km)", step: 0.01 },
@@ -366,4 +446,6 @@ label { display: flex; flex-direction: column; gap: 3px; }
 .dev-cfg { font-size: 10.5px; color: var(--text-2); }
 
 @media (max-width: 900px) { .setup { position: fixed; left: var(--gap); width: auto; } }
+.canopy { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.warnbox { color: var(--amber, #c8883a); }
 </style>

@@ -59,6 +59,23 @@ export async function computeRelayPlan() {
   return jsonOrThrow(await fetch(`${BASE_URL}/sites/active/plan`, { method: "POST" }));
 }
 
+export async function uploadCanopy(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  return jsonOrThrow(await fetch(`${BASE_URL}/sites/active/canopy`, { method: "POST", body: fd }));
+}
+
+export async function deleteCanopy() {
+  return jsonOrThrow(await fetch(`${BASE_URL}/sites/active/canopy`, { method: "DELETE" }));
+}
+
+export async function fetchCalibration({ sessionId = null, hours = 72, maxKm = null } = {}) {
+  const q = new URLSearchParams({ hours: String(hours) });
+  if (sessionId != null) q.set("session_id", String(sessionId));
+  if (maxKm != null) q.set("max_km", String(maxKm));
+  return jsonOrThrow(await fetch(`${BASE_URL}/sites/active/calibration?${q}`));
+}
+
 export const planGpxUrl = `${BASE_URL}/sites/active/plan.gpx`;
 
 // ── Perangkat LoRa ──
