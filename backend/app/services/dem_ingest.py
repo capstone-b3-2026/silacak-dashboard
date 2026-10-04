@@ -18,7 +18,7 @@ import rasterio
 from PIL import Image
 from rasterio.crs import CRS
 from rasterio.transform import from_bounds
-from rasterio.warp import Resampling, calculate_default_transform, reproject
+from rasterio.warp import Resampling, calculate_default_transform, reproject, transform_bounds
 from scipy.ndimage import gaussian_filter, map_coordinates
 
 from app.services.terrain_planner import ClutterSource, ElevationSource
@@ -286,9 +286,16 @@ def normalize_canopy(src_path: str, dst_path: str) -> dict:
                 notes.append("File tidak punya CRS; koordinatnya derajat, dianggap EPSG:4326.")
             else:
                 raise ValueError("File tidak punya CRS dan koordinatnya bukan derajat lat/lon. Set CRS-nya dulu.")
-        data = src.read(1).astype("float32")
+        raw = src.read(1)
+        data = raw.astype("float32")
         if src.nodata is not None:
             data[data == src.nodata] = np.nan
+        elif raw.dtype == np.uint8:
+            # peta tinggi kanopi 8-bit (mis. ETH 10 m: 0-254 = meter) memakai 255 sebagai "tidak ada data"
+            # walau berkasnya tidak mendeklarasikan nodata
+            if (raw == 255).any():
+                data[raw == 255] = np.nan
+                notes.append("Nilai 255 pada raster 8-bit dianggap tidak ada data.")
         data[~np.isfinite(data)] = np.nan
         valid = data[~np.isnan(data)]
         if valid.size == 0:
@@ -299,13 +306,15 @@ def normalize_canopy(src_path: str, dst_path: str) -> dict:
                 "Berkas ini mungkin DEM atau kelas tutupan lahan, bukan tinggi kanopi.")
         data = np.where(np.isnan(data), 0.0, np.clip(data, 0.0, None)).astype("float32")
 
-        lat_mid = (src.bounds.top + src.bounds.bottom) / 2
+        # lintang tengah HARUS dari koordinat geografis (bukan dari satuan CRS sumber seperti meter UTM/Mercator)
+        gw, gs, ge, gn = transform_bounds(crs, "EPSG:4326", *src.bounds)
+        lat_mid = (gs + gn) / 2
         target_deg = CANOPY_TARGET_RES_M / (111320.0 * math.cos(math.radians(lat_mid)))
         if crs.to_epsg() != 4326:
             notes.append(f"CRS {crs.to_string()} direproyeksi ke EPSG:4326.")
         transform, w, h = calculate_default_transform(crs, "EPSG:4326", src.width, src.height, *src.bounds)
-        if abs(transform.a) < target_deg:  # lebih halus dari ~10 m -> kasarkan
-            scale = target_deg / abs(transform.a)
+        scale = target_deg / abs(transform.a)
+        if scale > 1.5:  # jauh lebih halus dari ~10 m -> kasarkan (batasi memori)
             transform, w, h = calculate_default_transform(
                 crs, "EPSG:4326", src.width, src.height, *src.bounds, resolution=target_deg)
             notes.append(f"Resolusi dirata-ratakan ke ~{CANOPY_TARGET_RES_M:.0f} m (faktor {scale:.1f}).")
