@@ -26,7 +26,7 @@ async def insert_position(
              sequence, rssi_dbm, satellites, hdop, missing_since_previous,
              total_missing, battery_pct, recorded_at)
         VALUES
-            ($1, $2, ST_SetSRID(ST_MakePoint($3, $4), 4326)::geography, $5, $6, $7,
+            ($1, $2, point($3::float8, $4::float8), $5, $6, $7,
              $8, $9, $10, $11, $12, $13, $14, $15)
         """,
         hiker_id,
@@ -56,8 +56,8 @@ async def get_latest_positions(conn):
         SELECT DISTINCT ON (p.session_id)
             h.hiker_code,
             p.session_id,
-            ST_Y(k.location::geometry) AS lat,
-            ST_X(k.location::geometry) AS lon,
+            (k.location)[1] AS lat,
+            (k.location)[0] AS lon,
             k.elevation,
             p.battery_pct,
             p.hop_count,
@@ -100,8 +100,8 @@ async def get_session_track(conn, session_id: int):
     rows = await conn.fetch(
         """
         SELECT
-            ST_Y(p.location::geometry) AS lat,
-            ST_X(p.location::geometry) AS lon,
+            (p.location)[1] AS lat,
+            (p.location)[0] AS lon,
             p.elevation,
             p.recorded_at
         FROM positions p
@@ -141,7 +141,7 @@ async def find_stagnant_sessions(conn, window_minutes: int, radius_m: float):
             WHERE p3.session_id = s.id
               AND p3.location IS NOT NULL
               AND p3.recorded_at >= NOW() - make_interval(mins => $1)
-              AND NOT ST_DWithin(p3.location, last.location, $2)
+              AND geo_dist_m(p3.location, last.location) > $2
         )
         -- pastikan window-nya beneran penuh terisi: harus ada titik di 10 menit PERTAMA window
         AND EXISTS (

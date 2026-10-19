@@ -8,6 +8,7 @@ from pydantic import BaseModel, field_validator
 
 from app.core.database import get_db
 from app.repositories import position_repo
+from app.services.geo import thin_track
 from app.services.notifier import notifier
 
 router = APIRouter(prefix="/sessions", tags=["sessions"])
@@ -154,7 +155,11 @@ async def check_out(session_id: int, conn=Depends(get_db)):
 
 
 @router.get("/{session_id}/track")
-async def session_track(session_id: int, conn=Depends(get_db)):
+async def session_track(
+    session_id: int,
+    max_points: int = Query(1500, ge=0, le=100000, description="Jarangkan untuk tampilan (0 = semua titik)."),
+    conn=Depends(get_db),
+):
     if not await _get(conn, session_id):
         raise HTTPException(404, "Sesi tidak ditemukan.")
-    return await position_repo.get_session_track(conn, session_id)
+    return thin_track(await position_repo.get_session_track(conn, session_id), max_points)

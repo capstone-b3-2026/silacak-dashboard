@@ -18,3 +18,8 @@ frontend/dist/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Paket portable Windows (hasil build / binary besar, dibuat ulang oleh launcher/build_portable.ps1)
+launcher/dist/
+launcher/third_party/
+.build-venv/

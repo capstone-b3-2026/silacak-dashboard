@@ -5,7 +5,8 @@ Definisi (catat di laporan, ini yang membedakan dari model simulasi C-251):
                (paket pertama jadi jangkar, supaya jeda sebelum check-in tidak dihitung hilang).
 - Latency    = received_at (masuk DB) - recorded_at (jam GPS node). Hanya paket yang waktunya benar-benar dari GPS;
                validitasnya bergantung jam laptop sinkron (NTP). Nilai negatif = jam laptop tidak sinkron.
-- Basi       = tidak ada paket baru > STALE_AFTER_S detik.
+- Basi       = tidak ada paket baru > ambang ADAPTIF per sesi (4 x median jeda paket terbaru, dibatasi 15..600 dtk;
+               lihat services/liveness.py). Interval kirim TIDAK diasumsikan: firmware optimized ~0,3 dtk, real ~5 dtk.
 """
 import json
 
@@ -13,10 +14,45 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.database import get_db
 from app.repositories import position_repo
+from app.services import liveness
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
 
-STALE_AFTER_S = 120  # 4x interval lapor default (30 dtk); sesuaikan kalau interval diubah
+
+
+async def _recent_receive_times(conn) -> dict[int, list[float]]:
+    """12 waktu-terima terakhir per sesi aktif (epoch detik, terbaru dulu). LATERAL + LIMIT memakai indeks
+    (session_id, recorded_at DESC) jadi tidak memindai seluruh riwayat sesi."""
+    rows = await conn.fetch(
+        """
+        SELECT s.id AS session_id, t.ts
+        FROM hiking_sessions s
+        CROSS JOIN LATERAL (
+            SELECT array_agg(x.e ORDER BY x.e DESC) AS ts FROM (
+                SELECT EXTRACT(EPOCH FROM q.received_at)::float8 AS e
+                FROM positions q WHERE q.session_id = s.id
+                ORDER BY q.recorded_at DESC LIMIT 12
+            ) x
+        ) t
+        WHERE s.status = 'active'
+        """
+    )
+    return {r["session_id"]: list(r["ts"] or []) for r in rows}
+
+
+async def _configured_intervals(conn) -> dict[str, float]:
+    """hiker_code ('H01') -> interval lapor yang tercatat di Setup. Hanya cadangan kalau paket belum cukup
+    untuk mengukur; nilai ini belum tentu sama dengan yang dijalankan firmware."""
+    out: dict[str, float] = {}
+    for r in await conn.fetch("SELECT node_id, config FROM devices WHERE role = 'tracker'"):
+        cfg = r["config"]
+        if isinstance(cfg, str):
+            cfg = json.loads(cfg)
+        try:
+            out[f"H{int(r['node_id']):02d}"] = float(cfg["report_interval_s"])
+        except (KeyError, TypeError, ValueError):
+            pass
+    return out
 
 
 async def _base_xy(conn):
@@ -40,7 +76,7 @@ async def session_diagnostics(conn=Depends(get_db)):
             COALESCE(p.gps_valid, p.location IS NOT NULL) AS gps_valid,
             k.recorded_at AS last_fix_at,
             CASE WHEN $1::float8 IS NULL OR k.location IS NULL THEN NULL
-                 ELSE ST_Distance(k.location, ST_SetSRID(ST_MakePoint($2::float8, $1::float8), 4326)::geography) END AS dist_m,
+                 ELSE geo_dist_m(k.location, point($2::float8, $1::float8)) END AS dist_m,
             EXTRACT(EPOCH FROM now() - p.received_at) AS silent_s
         FROM positions p
         JOIN hiking_sessions s ON s.id = p.session_id AND s.status = 'active'
@@ -67,8 +103,11 @@ async def session_diagnostics(conn=Depends(get_db)):
         FROM r GROUP BY session_id
         """)
     st = {r["session_id"]: r for r in stats}
+    recent = await _recent_receive_times(conn)
+    cfg_iv = await _configured_intervals(conn)
     out = []
     for r in latest:
+        stale_after = liveness.stale_threshold_s(recent.get(r["session_id"]), cfg_iv.get(r["hiker_code"]))
         s = st.get(r["session_id"])
         rec, miss = (s["received"], int(s["missing"])) if s else (0, 0)
         denom = (rec - 1) + miss
@@ -86,9 +125,11 @@ async def session_diagnostics(conn=Depends(get_db)):
             "last_fix_at": r["last_fix_at"].isoformat() if r["last_fix_at"] else None,
             "dist_to_base_m": _f(r["dist_m"], 0),
             "silent_s": _f(r["silent_s"], 0),
-            "stale": float(r["silent_s"]) > STALE_AFTER_S,
+            "stale": float(r["silent_s"]) > stale_after,
+            "stale_after_s": _f(stale_after, 0),
         })
-    return {"stale_after_s": STALE_AFTER_S, "base_set": blat is not None, "sessions": out}
+    # stale_after_s tingkat atas = cadangan; ambang sebenarnya per sesi ada di sessions[].stale_after_s
+    return {"stale_after_s": liveness.FALLBACK_S, "base_set": blat is not None, "sessions": out}
 
 
 @router.get("/{hiker_code}/packets")
@@ -105,7 +146,7 @@ async def packet_log(hiker_code: str, limit: int = Query(60, ge=1, le=500), conn
                COALESCE(p.gps_valid, p.location IS NOT NULL) AS gps_valid,
                CASE WHEN p.time_from_gps THEN EXTRACT(EPOCH FROM p.received_at - p.recorded_at) END AS latency_s,
                CASE WHEN $2::float8 IS NULL OR p.location IS NULL THEN NULL
-                    ELSE ST_Distance(p.location, ST_SetSRID(ST_MakePoint($3::float8, $2::float8), 4326)::geography) END AS dist_m
+                    ELSE geo_dist_m(p.location, point($3::float8, $2::float8)) END AS dist_m
         FROM positions p WHERE p.session_id = $1
         ORDER BY p.recorded_at DESC LIMIT $4
         """, sid, blat, blon, limit)

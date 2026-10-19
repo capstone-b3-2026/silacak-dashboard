@@ -92,6 +92,14 @@ export async function updateDevice(id, d) {
     await fetch(`${BASE_URL}/devices/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(d) })
   );
 }
+// Petakan relay ke posisi R<n> pada rencana lokasi (null = lepas). Data dashboard saja, tidak dikirim ke alat.
+export async function setDevicePlanSlot(id, planSlot) {
+  return jsonOrThrow(
+    await fetch(`${BASE_URL}/devices/${id}/plan-slot`, {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plan_slot: planSlot }),
+    })
+  );
+}
 export async function deleteDevice(id) {
   return jsonOrThrow(await fetch(`${BASE_URL}/devices/${id}`, { method: "DELETE" }));
 }

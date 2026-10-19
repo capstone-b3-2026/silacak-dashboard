@@ -266,7 +266,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .mk-site { min-width: 24px; height: 24px; padding: 0 4px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 9px; font-weight: 700; border: 2px solid rgba(255, 255, 255, 0.85); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); cursor: default; user-select: none; }
 .mk-site.base { background: var(--green); }
 .mk-site.relay { background: var(--violet); }
-.mk-site.relay.broken { background: var(--red); }
+.mk-site.relay.broken { opacity: 0.6; outline: 2px dashed var(--text); outline-offset: 2px; } /* bukan merah: merah = SOS */
 .mk-site.drag { cursor: grab; box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
 .mk-site.drag:active { cursor: grabbing; }
 

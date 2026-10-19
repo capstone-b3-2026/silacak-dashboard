@@ -1,3 +1,4 @@
+from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.core.config import settings
@@ -20,3 +21,13 @@ def start_scheduler() -> None:
         misfire_grace_time=30,
     )
     scheduler.start()
+
+
+def reschedule_stagnant(minutes: int) -> None:
+    """Terapkan interval pemeriksaan baru tanpa restart (dipanggil setelah pengaturan diubah)."""
+    if not scheduler.running:
+        return
+    try:
+        scheduler.reschedule_job("stagnant_check", trigger="interval", minutes=minutes)
+    except JobLookupError:
+        pass

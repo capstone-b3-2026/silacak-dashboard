@@ -1,5 +1,96 @@
-"""Tabel yang dibuat saat backend start (idempotent). init.sql cuma jalan di
-DB baru, jadi tabel fitur Setup dibuat di sini biar DB lama tetap kebagian."""
+"""Seluruh skema dibuat/dimigrasi di sini saat backend start (idempotent), jadi
+backend bisa jalan di PostgreSQL polos (mode portable tanpa Docker) maupun di
+Docker Compose. Tidak ada extension wajib:
+
+- PostGIS TIDAK dipakai. Posisi disimpan sebagai tipe bawaan `point` (x = lon, y = lat)
+  dan jarak dihitung Haversine lewat fungsi SQL `geo_dist_m` (sesuai C-251 sec. 2.6.3).
+  DB lama dengan kolom `geography` dimigrasi otomatis (butuh PostGIS yang masih terpasang).
+- TimescaleDB OPSIONAL. Kalau extension-nya tersedia, `positions` dijadikan hypertable
+  (profil server); kalau tidak, tabel biasa (profil basecamp). Lihat ensure_schema().
+"""
+import logging
+
+log = logging.getLogger("silacak.schema")
+
+BASE_SQL = """
+CREATE TABLE IF NOT EXISTS hikers (
+    id                SERIAL PRIMARY KEY,
+    hiker_code        TEXT UNIQUE NOT NULL,   -- contoh: "H01" -- harus match ID yang dikirim node LoRa
+    full_name         TEXT,
+    phone_number      TEXT,
+    emergency_contact TEXT,
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS hiking_sessions (
+    id              SERIAL PRIMARY KEY,
+    hiker_id        INTEGER NOT NULL REFERENCES hikers(id),
+    trail_name      TEXT,
+    checked_in_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    checked_out_at  TIMESTAMPTZ,
+    status          TEXT NOT NULL DEFAULT 'active'  -- active | completed | emergency
+);
+
+CREATE TABLE IF NOT EXISTS alerts (
+    id              SERIAL PRIMARY KEY,
+    hiker_id        INTEGER NOT NULL REFERENCES hikers(id),
+    alert_type      TEXT NOT NULL,                  -- STAGNANT | MANUAL_SOS | LOW_BATTERY
+    status          TEXT NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | ACKNOWLEDGED | RESOLVED
+    triggered_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at     TIMESTAMPTZ,
+    meta            JSONB
+);
+CREATE INDEX IF NOT EXISTS idx_alerts_hiker_status ON alerts (hiker_id, status);
+
+-- Data time-series. location = point(lon, lat); NULL = paket tanpa GPS fix.
+-- Kolom radio persis sesuai baris CSV_DATA dari base_real.cpp / base_optimized.cpp.
+-- battery_pct: firmware saat ini TIDAK mengirim baterai -> selalu NULL (wajar).
+CREATE TABLE IF NOT EXISTS positions (
+    hiker_id                INTEGER NOT NULL REFERENCES hikers(id),
+    session_id              INTEGER REFERENCES hiking_sessions(id),
+    location                POINT,
+    elevation               DOUBLE PRECISION,
+    hop_count               INTEGER,
+    route_path              TEXT,
+    sequence                BIGINT,
+    rssi_dbm                SMALLINT,
+    missing_since_previous  INTEGER,
+    total_missing           INTEGER,
+    satellites              SMALLINT,
+    hdop                    DOUBLE PRECISION,
+    battery_pct             DOUBLE PRECISION,
+    recorded_at             TIMESTAMPTZ NOT NULL,                -- jam GPS node (bukan millis())
+    received_at             TIMESTAMPTZ NOT NULL DEFAULT now()   -- waktu masuk DB
+);
+CREATE INDEX IF NOT EXISTS idx_positions_hiker_time ON positions (hiker_id, recorded_at DESC);
+
+-- Jarak dua titik (meter), rumus Haversine, bola bumi radius rata-rata 6371008.8 m.
+-- Selisih terhadap jarak spheroid WGS84 (ex-PostGIS) < ~0.5%, kira-kira beberapa meter per km.
+CREATE OR REPLACE FUNCTION geo_dist_m(p1 point, p2 point) RETURNS float8 AS $$
+    SELECT CASE WHEN p1 IS NULL OR p2 IS NULL THEN NULL ELSE
+        2 * 6371008.8 * asin(least(1.0, sqrt(
+            power(sin(radians((p2)[1] - (p1)[1]) / 2), 2) +
+            cos(radians((p1)[1])) * cos(radians((p2)[1])) *
+            power(sin(radians((p2)[0] - (p1)[0]) / 2), 2)
+        )))
+    END
+$$ LANGUAGE sql IMMUTABLE;
+"""
+
+# DB lama (sebelum PostGIS dibuang): kolom geography -> point. Idempotent: no-op kalau sudah point.
+MIGRATE_GEOGRAPHY_SQL = """
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = current_schema() AND table_name = 'positions'
+                 AND column_name = 'location' AND udt_name = 'geography') THEN
+        DROP INDEX IF EXISTS idx_positions_geo;
+        ALTER TABLE positions ALTER COLUMN location TYPE point
+            USING (CASE WHEN location IS NULL THEN NULL
+                        ELSE point(ST_X(location::geometry), ST_Y(location::geometry)) END);
+    END IF;
+END $$;
+"""
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS sites (
@@ -26,6 +117,11 @@ CREATE TABLE IF NOT EXISTS devices (
     pushed_version  INTEGER NOT NULL DEFAULT 0,           -- versi terakhir yang dikonfirmasi sampai ke alat
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Relay: dipasang di posisi R<n> pada rencana lokasi (plan.relays[].n). Data DASHBOARD saja (tidak dikirim ke alat),
+-- dipakai untuk menggambar rute paket di peta: firmware menulis rute sebagai ID node relay mentah ("R5>R6").
+ALTER TABLE devices ADD COLUMN IF NOT EXISTS plan_slot INTEGER;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_devices_plan_slot ON devices (plan_slot) WHERE plan_slot IS NOT NULL;
 
 -- Antrean perintah ke hardware. Dashboard cuma MENULIS ke sini; yang benar-benar
 -- ngirim ke alat adalah bridge serial (lihat reference-for-hardware-team).
@@ -130,8 +226,8 @@ BEGIN
         json_build_object(
             'hiker_code', v_hiker_code,
             'session_id', NEW.session_id,
-            'lat', ST_Y(NEW.location::geometry),
-            'lon', ST_X(NEW.location::geometry),
+            'lat', (NEW.location)[1],
+            'lon', (NEW.location)[0],
             'elevation', NEW.elevation,
             'battery_pct', NEW.battery_pct,
             'hop_count', NEW.hop_count,
@@ -147,8 +243,32 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_notify_position ON positions;
+CREATE TRIGGER trg_notify_position
+    AFTER INSERT ON positions
+    FOR EACH ROW EXECUTE FUNCTION notify_position_insert();
 """
 
 
-async def ensure_schema(conn) -> None:
+async def _try_timescale(conn) -> bool:
+    """Opsional: jadikan positions hypertable kalau TimescaleDB tersedia. Tidak pernah fatal."""
+    try:
+        if not await conn.fetchval("SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb'"):
+            return False
+        await conn.execute("CREATE EXTENSION IF NOT EXISTS timescaledb")
+        await conn.execute(
+            "SELECT create_hypertable('positions', 'recorded_at', if_not_exists => TRUE, migrate_data => TRUE)"
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001 - extension bukan syarat; lanjut sebagai tabel biasa
+        log.warning("TimescaleDB tersedia tapi gagal dipakai (%s); lanjut tanpa hypertable.", exc)
+        return False
+
+
+async def ensure_schema(conn) -> bool:
+    """Buat/migrasi skema. Return True kalau positions berjalan sebagai hypertable TimescaleDB."""
+    await conn.execute(BASE_SQL)
+    await conn.execute(MIGRATE_GEOGRAPHY_SQL)
     await conn.execute(SCHEMA_SQL)
+    return await _try_timescale(conn)

@@ -230,6 +230,19 @@
             <div class="dev-cfg">
               lapor {{ d.config.report_interval_s }} dtk · TX {{ d.config.tx_power_dbm }} dBm · SF{{ d.config.sf }}
             </div>
+            <div v-if="d.role === 'relay'" class="dev-slot">
+              <span class="lbl">Dipasang di posisi</span>
+              <select
+                class="inp"
+                :value="d.plan_slot ?? ''"
+                :disabled="dev.busy"
+                @change="dev.setSlot(d.id, $event.target.value === '' ? null : Number($event.target.value))"
+              >
+                <option value="">belum dipetakan</option>
+                <option v-for="n in slotChoices(d)" :key="n" :value="n">R{{ n }}</option>
+              </select>
+              <span v-if="!slotOptions.length" class="hint">Hitung rencana relay dulu di tab Lokasi.</span>
+            </div>
             <p v-if="d.last_command?.status === 'failed' && d.last_command.error" class="err sm">{{ d.last_command.error }}</p>
             <div class="row">
               <button class="btn sm primary" :disabled="dev.busy || pushing(d)" @click="dev.push(d.id)">
@@ -347,6 +360,13 @@ function toggleEdit(mode) {
 }
 
 // ── perangkat ──
+// Relay dipetakan ke posisi R<n> dari rencana lokasi supaya rute paket ("R5>R6") bisa digambar di peta.
+const slotOptions = computed(() => (site.site?.plan?.relays || []).map((r) => r.n));
+function slotChoices(d) {
+  const set = new Set(slotOptions.value);
+  if (d.plan_slot != null) set.add(d.plan_slot); // rencana dihitung ulang: tetap tampilkan pilihan lama agar kelihatan
+  return [...set].sort((a, b) => a - b);
+}
 const emptyForm = () => ({ node_id: null, name: "", role: "tracker", config: { report_interval_s: 30, tx_power_dbm: 17, sf: 9 } });
 const form = reactive(emptyForm());
 const editId = ref(null);
@@ -444,6 +464,7 @@ label { display: flex; flex-direction: column; gap: 3px; }
 .dev-top { display: flex; align-items: center; gap: 8px; }
 .nid { width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: var(--blue-glow); color: var(--blue); font-weight: 700; font-size: 11px; flex-shrink: 0; }
 .dev-cfg { font-size: 10.5px; color: var(--text-2); }
+.dev-slot { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 @media (max-width: 900px) { .setup { position: fixed; left: var(--gap); width: auto; } }
 .canopy { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }

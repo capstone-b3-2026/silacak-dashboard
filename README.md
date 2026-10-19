@@ -70,7 +70,7 @@ Nomor subbab C-251 di bawah dirujuk dari draf C-601. Cocokkan dengan dokumen C-2
 
 | ID | Aspek | C-251 | Implementasi sekarang | Alasan dan bukti |
 |---|---|---|---|---|
-| P01 | Basis data | SQLite pada single-board computer, 3 tabel (Subbab 2.7.3) | PostgreSQL, PostGIS, TimescaleDB lewat Docker di laptop basecamp | Jarak ke base dan deteksi stagnan dihitung di basis data dengan tipe `geography` (`ST_Distance`, `ST_DWithin`). Penyampaian data tanpa polling memakai `LISTEN/NOTIFY` yang tidak dimiliki SQLite. RAB C-251 menyebut laptop basecamp sudah tersedia dan tidak membeli SBC, jadi biaya perangkat tidak naik. Tetap sepenuhnya lokal tanpa internet. Biaya yang ditanggung: butuh Docker dan memori lebih besar. Bukti: `docker-compose.yml`, `schema.py`, `find_stagnant_sessions` di `position_repo.py`. |
+| P01 | Basis data | SQLite pada single-board computer, 3 tabel (Subbab 2.7.3) | PostgreSQL biasa di laptop basecamp (Docker untuk profil server, binary portable untuk profil basecamp). TimescaleDB opsional, PostGIS tidak dipakai | Jarak dihitung Haversine (fungsi SQL `geo_dist_m`, sesuai Subbab 2.6.3) dari kolom bertipe `point`; selisih terhadap spheroid kurang dari sekitar 0,5 persen. Penyampaian data tanpa polling memakai `LISTEN/NOTIFY` yang tidak dimiliki SQLite. RAB C-251 menyebut laptop basecamp sudah tersedia dan tidak membeli SBC. Tetap sepenuhnya lokal tanpa internet. TimescaleDB hanya dipasang bila tersedia (kompresi dan retensi untuk profil server); fitur dashboard tidak bergantung padanya. Bukti: `schema.py`, `find_stagnant_sessions` di `position_repo.py`. |
 | P02 | Peta | Leaflet dengan OpenStreetMap (Subbab 2.7.2) | MapLibre GL 2D dan 3D, peta topo offline dari DEM, OSM sebagai opsi | C-251 menetapkan bahwa LOS atau NLOS ditentukan oleh relief, jadi petugas yang menilai tautan perlu melihat relief. Ubin topo dibangkitkan dari DEM yang sama dengan perencana, sehingga basecamp tidak bergantung pada penyedia ubin. Fungsi inti (marker, polyline jejak, popup) tetap ada. Bukti: `MapView.vue`, `dem_ingest.py`. |
 | P03 | Real-time | WebSocket dua arah, target pembaruan 60 detik (Subbab 2.7.1) | SSE melalui `pg_notify`, aksi pengguna lewat REST | Satu-satunya aliran kontinu adalah dari server ke klien. Aksi klien (check-in, setup) bersifat diskret. `EventSource` menyambung ulang otomatis. Target 60 detik tidak bergantung pada protokol karena interval lapor 30 detik jauh lebih besar daripada waktu penerusan di jaringan lokal. Batas: SSE satu arah dan peramban membatasi sekitar enam koneksi per origin. |
 | P04 | Skema paket | Payload konseptual: ID, koordinat, timestamp, baterai, RSSI, SNR, SOS | 18 field `CSV_DATA` dari firmware nyata | Ditambahkan nomor urut, rute dan jumlah hop, kecepatan, satelit, HDOP, penanda GPS, penghitung paket hilang, dan waktu GPS. Semuanya dibutuhkan oleh kriteria C-251 sendiri (validitas GPS, membedakan paket langsung dan relay, PDR, latensi). Baterai, SNR, dan SOS tidak ada pada firmware saat ini. Itu kesenjangan, bukan perubahan yang dibela. |
@@ -108,8 +108,14 @@ Ambang spesifikasi tidak diubah. Kolom terakhir menunjukkan seberapa jauh dashbo
 
 Bridge berjalan di host, bukan di Docker, karena membutuhkan akses ke port serial.
 
+Pengaturan operator (parameter alarm stagnan) bisa diubah tanpa menyentuh `.env` lewat halaman `/pengaturan` (wizard `/awal` tampil sekali saat pertama kali dijalankan lewat launcher). API-nya `GET/PUT /api/v1/app-config` hanya menerima kunci pada daftar putih dengan batas nilai (`backend/app/services/app_settings.py`); nilai tersimpan di `DATA_DIR/app_settings.json` dan berlaku tanpa restart.
+
+Rute paket nyata digambar di peta untuk pendaki yang dipilih: garis putus-putus terang dari posisi pendaki, lewat relay yang tercatat di `route_path`, sampai base, dengan cincin di tiap relay yang dilewati ("LANGSUNG" = garis lurus ke base). Firmware menulis rute sebagai ID node relay mentah (mis. `R5>R6`), sedangkan koordinat relay ada di rencana lokasi (R1 sampai Rn), jadi tiap perangkat relay harus dipetakan lewat Setup > Perangkat > "Dipasang di posisi" (kolom `devices.plan_slot`, data dashboard saja, tidak dikirim ke alat). Relay yang belum dipetakan dilewati dan diberi tahu lewat pesan di peta. Asumsi yang belum terbukti pada alat: urutan `route_path` = urutan relay dari pendaki ke base. Kode firmware relay (`relay_real.cpp`, relay menambahkan ID-nya sendiri saat meneruskan) mendukung urutan itu, tetapi relay fisik belum dibangun dan diuji; bila terbalik, cukup membalik urutan di `utils/routeGeo.js`. Jika rencana relay dihitung ulang, nomor R<n> bisa bergeser: periksa kembali pemetaannya. Tes logika: `node frontend/src/utils/routeGeo.test.mjs`.
+
+Alternatif tanpa bridge terpisah: backend dapat membaca serial sendiri (`SERIAL_PORT=auto` atau nama port, lihat `backend/.env.example`). Port ESP32 ditemukan otomatis, koneksi pulih sendiri bila kabel dicabut, status ada di `GET /api/v1/base/status`, dan setiap baris `CSV_DATA` ditulis dulu ke log mentah append-only (`DATA_DIR/raw/YYYY-MM-DD.log`) sebelum masuk basis data. Bawaannya `off` agar tidak bentrok dengan bridge eksternal; jangan jalankan keduanya pada port yang sama. Di Docker Desktop untuk Windows port USB tidak diteruskan ke kontainer, jadi pemakaian ini ditujukan untuk mode portable (`launcher/`).
+
 - Backend: FastAPI, asyncpg (SQL langsung, bukan ORM), APScheduler.
-- Basis data: PostgreSQL 16 dengan PostGIS dan TimescaleDB (`positions` berupa hypertable, koordinat bertipe `geography`).
+- Basis data: PostgreSQL 16. Koordinat bertipe `point` (x = lon, y = lat), jarak lewat fungsi `geo_dist_m` (Haversine). `positions` menjadi hypertable hanya bila TimescaleDB tersedia (profil server); di profil basecamp berupa tabel biasa.
 - Frontend: Vue 3, Vite, Pinia, MapLibre GL JS. Disajikan nginx pada port 8080.
 - Real-time: posisi dan alarm lewat SSE yang didorong `pg_notify` (bukan WebSocket). Diagnostik tautan (PDR, latensi, node basi, packet log) di-poll dashboard tiap 5 detik (`App.vue`), karena status "basi" memang perlu dihitung ulang berkala walau tidak ada paket baru.
 - Deployment: Docker Compose dengan 3 layanan (`db`, `backend`, `frontend`).
@@ -174,7 +180,7 @@ docker compose down -v
 docker compose up --build
 ```
 
-Skema basis data dibuat oleh `infra/postgres/init.sql` pada inisialisasi pertama, lalu dilengkapi dan dimigrasikan otomatis oleh `backend/app/core/schema.py` setiap backend start.
+Seluruh skema basis data (tabel, fungsi, trigger) dibuat dan dimigrasikan otomatis oleh `backend/app/core/schema.py` setiap backend start, sehingga backend juga jalan di PostgreSQL polos. `infra/postgres/init.sql` hanya menyiapkan ekstensi opsional TimescaleDB untuk Docker. Basis data lama yang masih memakai kolom `geography` dimigrasikan otomatis ke `point` (butuh PostGIS masih terpasang pada basis data itu; jalur ini belum diuji pada basis data sungguhan).
 
 ### Mode pengembangan frontend
 
@@ -375,7 +381,7 @@ Untuk aplikasi GUI isi host `localhost`, port `5432`, database `silacak`, penggu
 
 Dari komputer lain (misalnya bridge berjalan di PC yang mencolok ke base station, sementara Docker di laptop lain): ganti `localhost` dengan alamat IP laptop yang menjalankan Docker, mis. `--database-url postgresql://silacak:silacak@192.168.1.10:5432/silacak`. Port 5432 harus terjangkau dan tidak diblokir firewall. Hal ini membuka basis data ke jaringan, jadi baca bagian Keamanan lebih dulu.
 
-Tabel utama: `hikers`, `hiking_sessions`, `positions` (hypertable), `alerts`, `sites`, `devices`, `device_commands`.
+Tabel utama: `hikers`, `hiking_sessions`, `positions` (hypertable bila TimescaleDB tersedia), `alerts`, `sites`, `devices`, `device_commands`.
 
 Pertanyaan yang berguna saat pengujian pertama:
 
@@ -430,7 +436,7 @@ Untuk tim hardware, hal yang perlu dipastikan:
 |---|---|---|
 | PDR sesi | PDR = (N - 1) / ((N - 1) + hilang), dengan N jumlah paket diterima. Paket pertama menjadi jangkar (tidak dihitung sebagai diterima maupun hilang). "Hilang" adalah jumlah `missing_since_previous` mulai paket kedua. | Nilai hilang dihitung oleh firmware base, bukan oleh dashboard. Kehilangan beruntun di akhir sesi tidak terdeteksi, sehingga taksiran cenderung terlalu tinggi. Perilaku penghitung saat node reboot belum diverifikasi. |
 | Latensi | Waktu paket tersimpan di basis data dikurangi waktu GPS pada paket. Dilaporkan sebagai P50 dan P95 per sesi, dalam detik. | Hanya paket dengan waktu dari GPS. Selisih jam laptop terhadap UTC masuk langsung ke hasil. Nilai negatif berarti jam tidak sinkron. Besaran ini memuat juga waktu tunggu sebelum pengiriman dan pemrosesan di sisi base. |
-| Node basi | Tidak ada paket baru lebih dari 120 detik (empat kali interval lapor bawaan 30 detik). | Ambang bersifat tetap di `backend/app/api/v1/diagnostics.py` (`STALE_AFTER_S`) dan perlu disesuaikan bila interval lapor diubah. |
+| Node basi | Tidak ada paket baru lebih lama dari ambang adaptif per sesi: 4 kali median jeda antar paket terbaru, dibatasi 15 sampai 600 detik (`backend/app/services/liveness.py`). | Interval kirim tidak diasumsikan karena firmware `pendaki_optimized` mengirim terus-menerus (jeda sekitar 0,3 detik) dan `pendaki_real` tiap 5 detik ±20 persen. Angka 30 detik di C-251 tidak ada di kode firmware. Bila paket belum cukup untuk diukur dipakai interval dari halaman Setup (cadangan), lalu 120 detik. |
 | RSSI vs jarak | Hanya paket langsung (0 hop). Regresi RSSI terhadap log10 jarak memerlukan sedikitnya 5 titik dengan rasio jarak terjauh terhadap terdekat minimal 1,5. Titik dengan jarak di bawah 10 m dikeluarkan. | RSSI adalah besaran per tautan. Untuk paket via relay, jarak pendaki ke base bukan jarak tautan yang diukur, sehingga paket itu tidak dipakai. Syarat jumlah titik hanyalah syarat minimum agar regresi terdefinisi, bukan jaminan keandalan statistik. |
 
 Akurasi GPS tidak dihitung di dashboard. Dashboard hanya menampilkan jumlah satelit dan HDOP. Hitung galat posisi secara offline terhadap titik referensi.
@@ -504,8 +510,8 @@ frontend/
     services/api.js
   nginx.conf                 meneruskan /api ke backend dengan proxy_buffering off (wajib untuk SSE)
 infra/postgres/
-  Dockerfile                 build PostGIS ditambah TimescaleDB lewat apt
-  init.sql                   skema awal, ekstensi, trigger
+  Dockerfile                 build PostGIS ditambah TimescaleDB lewat apt (profil server; PostGIS tidak lagi dipakai aplikasi)
+  init.sql                   ekstensi opsional (TimescaleDB); skema ada di backend/app/core/schema.py
 reference-for-hardware-team/
   serial_to_postgres_bridge.py, README.md
 samples/
@@ -583,7 +589,7 @@ Urutan disarankan dari yang paling mendesak.
 - [ ] `docker compose up --build` berhasil, `/health` menjawab, dan skema termigrasi (cek tabel `positions` memiliki kolom `gps_valid`, `gps_flags`, `time_from_gps`).
 - [ ] Unggah `samples/bukit_klangon.tif` di Setup (atau jalankan `scripts/load_sample_site.py`) dan pastikan peta topo offline muncul.
 - [ ] Jalankan data sintetis, pastikan peta, sesi, dan alarm stagnan berfungsi, lalu `docker compose down -v` untuk membersihkan. Ingat bahwa PDR dan latensi tidak teruji oleh seeder saat ini (G14).
-- [ ] Sambungkan base station, jalankan bridge, dan cek dengan SQL (bagian Mengakses Basis Data) bahwa paket masuk. Perhatikan isi `gps_flags` dan apakah ada nilai yang menandai fix tidak valid. Bila ada, sesuaikan aturan `gps_valid` di bridge.
+- [ ] Sambungkan base station dan cek dengan SQL (bagian Mengakses Basis Data) bahwa paket masuk. Temuan dari kode firmware: saat tidak ada fix, firmware mencetak koordinat `0.0000000,0.0000000` (bukan kosong) dan bit `LocationValid` (`gps_flags & 1`) tidak di-set. Parser sekarang memakai bit itu sehingga paket tanpa fix disimpan dengan lokasi NULL; perlu dikonfirmasi dengan data lapangan.
 - [ ] Sinkronkan jam laptop (NTP).
 - [ ] Verifikasi apakah `missing_since_previous` terisi dengan benar. Bila selalu 0, PDR akan terbaca 100 persen dan tidak berarti.
 
@@ -639,5 +645,5 @@ Urutan disarankan dari yang paling mendesak.
 - Layanan `db` dibuat dari `infra/postgres/Dockerfile` (basis `postgis/postgis`, TimescaleDB ditambahkan lewat apt), bukan dari image siap pakai `timescale/timescaledb-ha`. Image itu sempat gagal mengubah izin folder data pada Docker Desktop for Windows (WSL2).
 - Penjadwal memakai `misfire_grace_time=30` detik. Nilai bawaan satu detik membuat pemeriksaan alarm sering terlewat akibat timer jitter di Docker.
 - Proses DEM yang terputus karena backend mati ditandai galat pada startup berikutnya, agar tidak terlihat memproses selamanya.
-- Perubahan skema dilakukan lewat `schema.py` (idempotent). Berkas `init.sql` hanya berlaku pada inisialisasi pertama volume basis data.
+- Perubahan skema dilakukan lewat `schema.py` (idempotent) dan berlaku untuk basis data baru maupun lama.
 - Koordinat bawaan pada peta dan data sintetis diarahkan ke Bukit Klangon (Cangkringan, Sleman) sebagai perkiraan dari sumber online, bukan hasil digitasi GPX. Bila jalur target berada di kawasan taman nasional, pastikan izin masuk dan status akses jalur terbaru sebelum uji lapangan.

@@ -24,7 +24,7 @@
                 </div>
                 <div class="selc-side">
                   <span class="bdg" :class="selSosCount > 0 ? 'bad' : 'ok'">{{ selSosCount > 0 ? "sos" : "normal" }}</span>
-                  <span v-if="selDiag?.stale" class="bdg bad" :title="`tidak ada paket > ${diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
+                  <span v-if="selDiag?.stale" class="bdg bad" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
                   <span v-if="selected.gps_valid === false" class="bdg bad" title="Nsat < 4, HDOP > 5, atau tanpa fix: posisi di peta = lokasi terakhir">gps invalid · lokasi terakhir</span>
                   <div class="selc-batt" :class="battClass(selected.battery_pct)">
                     <strong>{{ selected.battery_pct != null ? `${selected.battery_pct}%` : "—" }}</strong>

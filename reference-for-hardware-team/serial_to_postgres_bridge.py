@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """
+CATATAN: fungsi script ini sekarang SUDAH tertanam di backend (app/services/serial_ingest.py,
+dijalankan otomatis kalau SERIAL_PORT diatur). Script ini dipertahankan sebagai referensi/alat
+debug mandiri; JANGAN jalankan bersamaan dengan ingest bawaan pada port yang sama.
+
 REFERENSI - bukan bagian resmi dari dashboard SiLacak.
 
 Ini contoh cara nyambungin base station (via USB serial) ke database
@@ -164,6 +168,10 @@ async def write_to_postgres(pool: asyncpg.Pool, row: dict[str, str]) -> None:
     lon = to_float(row["longitude"])
     sats = to_int(row["satellites"])
     hdop = to_float(row["hdop"])
+    flags = to_int(row["gps_flags"])
+    # Firmware mencetak 0.0000000,0.0000000 (bukan kosong) saat tidak ada fix; bit LocationValid (1) tidak di-set.
+    if (flags is not None and not (flags & 1)) or (lat == 0.0 and lon == 0.0):
+        lat = lon = None
     if lat is None or lon is None:
         lat = lon = None  # paket tanpa fix TETAP disimpan (hitung PDR, status GPS invalid, lokasi terakhir)
     # Kriteria validitas dari plan C-251 (4.1.3): Nsat >= 4 dan HDOP <= 5
@@ -188,7 +196,7 @@ async def write_to_postgres(pool: asyncpg.Pool, row: dict[str, str]) -> None:
                  total_missing, recorded_at, gps_valid, gps_flags, time_from_gps)
             VALUES
                 ($1, CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL
-                          ELSE ST_SetSRID(ST_MakePoint($2::float8, $3::float8), 4326)::geography END,
+                          ELSE point($2::float8, $3::float8) END,
                  $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
             """,
             hiker_id,

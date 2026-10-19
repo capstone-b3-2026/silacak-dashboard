@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { fetchDevices, createDevice, updateDevice, deleteDevice, pushDevice } from "../services/api";
+import { fetchDevices, createDevice, updateDevice, deleteDevice, pushDevice, setDevicePlanSlot } from "../services/api";
 
 export const useDeviceStore = defineStore("devices", {
   state: () => ({ devices: [], error: null, busy: false, _timer: null }),
@@ -19,6 +19,16 @@ export const useDeviceStore = defineStore("devices", {
       clearTimeout(this._timer);
       if (this.inFlight) this._timer = setTimeout(() => this.load(), 3000);
     },
+    // Muat sekali TANPA polling. Dipakai peta (pemetaan relay untuk rute). load() menjadwalkan ulang tiap 3 dtk selama ada
+    // perintah yang belum dikonfirmasi alat, sehingga kalau dipakai peta, polling jalan terus walau panel Setup tertutup.
+    async refresh() {
+      try {
+        this.devices = await fetchDevices();
+        this.error = null;
+      } catch (e) {
+        this.error = e.message;
+      }
+    },
     async _run(fn) {
       this.busy = true;
       this.error = null;
@@ -36,6 +46,9 @@ export const useDeviceStore = defineStore("devices", {
     save(form, id = null) {
       const body = { node_id: Number(form.node_id), name: form.name, role: form.role, config: form.config };
       return this._run(() => (id ? updateDevice(id, body) : createDevice(body)));
+    },
+    setSlot(id, slot) {
+      return this._run(() => setDevicePlanSlot(id, slot));
     },
     remove(id) {
       return this._run(() => deleteDevice(id));

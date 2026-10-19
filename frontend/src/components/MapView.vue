@@ -48,6 +48,8 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import { useHikerStore } from "../stores/hikers";
 import { useAlertStore } from "../stores/alerts";
 import { useSiteStore } from "../stores/site";
+import { useDeviceStore } from "../stores/devices";
+import { buildRoute, routeFeatureCollection, unresolvedMessage } from "../utils/routeGeo";
 
 const props = defineProps({ theme: { type: String, default: "dark" } });
 defineEmits(["toggle-theme"]);
@@ -56,6 +58,7 @@ const mapContainer = ref(null);
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
 const siteStore = useSiteStore();
+const deviceStore = useDeviceStore(); // untuk memetakan ID relay di route_path ke posisinya
 const is3d = ref(false);
 let map = null;
 let mapReady = false;
@@ -76,7 +79,10 @@ const pendakiAktif = computed(() => Object.keys(hikerStore.hikers).length);
 // pindah & dikunci ke cakupan DEM-nya.
 const START_CENTER = [110.453, -7.578];
 
-const TRAIL_COLORS = ["#4d8fd6", "#c8883a", "#5aaa5a", "#8068c8", "#3dab7e", "#d6708a", "#c8b23a"];
+// Palet jejak SENGAJA hanya warna dingin (toska/biru) yang belum punya arti lain di UI. Jangan tambahkan merah/merah muda
+// (SOS), oranye/kuning (link marginal, jalur lokasi), hijau (link kuat, base), atau ungu (relay).
+// 7 entri: H01, H02, H03, H11, H12 jatuh di indeks berbeda (tidak kembar).
+const TRAIL_COLORS = ["#1aa3a3", "#3b6fd0", "#22b8cf", "#8fb0ff", "#5f7d95", "#6bb6ff", "#7fd6e6"];
 function colorFor(code) {
   let h = 0;
   for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) >>> 0;
@@ -224,6 +230,23 @@ function syncTrails() {
     });
   }
   map.getSource("tracks")?.setData({ type: "FeatureCollection", features });
+}
+
+// ── rute paket NYATA: pendaki terpilih -> relay yang dilewati -> base ──
+let routeNoticeKey = "";
+function syncRoute() {
+  if (!mapReady) return;
+  const code = hikerStore.selectedCode;
+  const h = code ? hikerStore.hikers[code] : null;
+  const st = siteStore.site;
+  const route = h
+    ? buildRoute({ hiker: h, routePath: h.route_path, devices: deviceStore.devices, relays: st?.plan?.relays || [], base: st?.base || null })
+    : { coords: [], hops: [], unresolved: [], direct: false, complete: false };
+  map.getSource("route")?.setData(routeFeatureCollection(route));
+  const msg = h ? unresolvedMessage(route) : "";
+  const key = msg ? `${code}|${h.route_path}` : "";
+  if (msg && key !== routeNoticeKey) showNotice(msg); // sekali per kombinasi pendaki+rute, bukan tiap paket
+  routeNoticeKey = key;
 }
 
 // ── dasar peta: OSM (online) atau Topo (offline, dirender dari DEM) ──
@@ -399,6 +422,7 @@ function syncSite() {
 }
 
 onMounted(() => {
+  deviceStore.refresh(); // peta butuh pemetaan relay sejak awal (tanpa polling; polling hanya untuk panel Setup)
   map = new maplibregl.Map({
     container: mapContainer.value,
     style: buildStyle(),
@@ -442,12 +466,29 @@ onMounted(() => {
       id: "site-pts", type: "circle", source: "site", filter: ["==", ["get", "kind"], "pt"],
       paint: { "circle-radius": 3.5, "circle-color": "#e0b050", "circle-stroke-color": "#fff", "circle-stroke-width": 1 },
     });
+    // rute paket: garis putus-putus terang berbingkai gelap (terbaca di tema gelap maupun terang) + cincin di relay yang dilewati
+    map.addSource("route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({
+      id: "route-casing", type: "line", source: "route", filter: ["==", ["get", "kind"], "route"],
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#0f1521", "line-width": 6, "line-opacity": 0.55 },
+    });
+    map.addLayer({
+      id: "route-line", type: "line", source: "route", filter: ["==", ["get", "kind"], "route"],
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#f5f7fb", "line-width": 2.5, "line-dasharray": [2, 1.5] },
+    });
+    map.addLayer({
+      id: "route-hops", type: "circle", source: "route", filter: ["==", ["get", "kind"], "hop"],
+      paint: { "circle-radius": 13, "circle-opacity": 0, "circle-stroke-color": "#f5f7fb", "circle-stroke-width": 2.5 },
+    });
     mapReady = true;
     if (!navigator.onLine && basemap.value === "osm") basemap.value = "topo"; // browser sudah tahu sedang offline
     syncDem();
     syncSite();
     syncTrails();
     syncMarkers();
+    syncRoute();
     if (is3d.value) set3d(true);
   });
 
@@ -464,12 +505,13 @@ onBeforeUnmount(() => {
   mapReady = false;
 });
 
-watch(() => hikerStore.hikers, syncMarkers, { deep: true });
+watch(() => hikerStore.hikers, () => { syncMarkers(); syncRoute(); }, { deep: true });
+watch(() => deviceStore.devices, syncRoute, { deep: true });
 watch(() => hikerStore.tracks, syncTrails, { deep: true });
 watch(() => alertStore.alerts, syncMarkers, { deep: true });
 watch(() => props.theme, applyRasterTheme);
 watch(topoReady, applyBasemap);
-watch(() => siteStore.site, () => { syncDem(); syncSite(); }, { deep: true });
+watch(() => siteStore.site, () => { syncDem(); syncSite(); syncRoute(); }, { deep: true });
 watch(() => siteStore.showSetup, syncSite);
 watch(() => siteStore.editMode, (m) => { if (map) map.getCanvas().style.cursor = m ? "crosshair" : ""; });
 
@@ -477,6 +519,7 @@ watch(
   () => hikerStore.selectedCode,
   (code) => {
     syncMarkers();
+    syncRoute();
     const h = code ? hikerStore.hikers[code] : null;
     if (h && h.lat != null && h.lon != null) map?.easeTo({ center: [h.lon, h.lat], duration: 600 });
   }
