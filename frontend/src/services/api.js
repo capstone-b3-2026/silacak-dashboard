@@ -59,6 +59,17 @@ export async function computeRelayPlan() {
   return jsonOrThrow(await fetch(`${BASE_URL}/sites/active/plan`, { method: "POST" }));
 }
 
+// Jarak 3D (profil penuh dari DEM) sepanjang base -> trail. Sekunder: horizontal dihitung instan di frontend.
+export async function fetchTrailDistance3d(payload) {
+  return jsonOrThrow(
+    await fetch(`${BASE_URL}/sites/active/trail-distance`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+  );
+}
+
 export async function uploadCanopy(file) {
   const fd = new FormData();
   fd.append("file", file);

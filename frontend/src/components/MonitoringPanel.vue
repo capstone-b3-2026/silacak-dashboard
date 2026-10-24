@@ -24,8 +24,8 @@
                 </div>
                 <div class="selc-side">
                   <span class="bdg" :class="selSosCount > 0 ? 'bad' : 'ok'">{{ selSosCount > 0 ? "SOS" : "Normal" }}</span>
-                  <span v-if="selDiag?.stale" class="bdg bad" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
-                  <span v-if="selected.gps_valid === false" class="bdg bad" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta = lokasi terakhir">GPS tidak valid · lokasi terakhir</span>
+                  <span v-if="selDiag?.stale" class="bdg warn" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
+                  <span v-if="selected.gps_valid === false" class="bdg neutral" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta = lokasi terakhir">GPS tidak valid · lokasi terakhir</span>
                   <div class="selc-batt" :class="battClass(selected.battery_pct)">
                     <strong>{{ selected.battery_pct != null ? `${selected.battery_pct}%` : "—" }}</strong>
                     <span>Baterai</span>
@@ -113,7 +113,7 @@
             <div v-if="!diagStore.list.length" class="empty">Belum ada paket masuk dari sesi aktif</div>
             <div v-else class="lnkl">
               <div v-for="d in diagStore.list" :key="d.session_id" class="lnk" style="cursor: pointer" @click="hikerStore.selectHiker(d.hiker_code)">
-                <div class="etit"><span>{{ d.hiker_code }} · {{ d.route_path || "langsung" }}</span><span class="bdg" :class="d.stale ? 'bad' : 'ok'">{{ d.stale ? `Tidak terdengar ${fmtAge(d.silent_s)}` : "Terdengar" }}</span></div>
+                <div class="etit"><span>{{ d.hiker_code }} · {{ d.route_path || "langsung" }}</span><span class="bdg" :class="d.stale ? 'warn' : 'ok'">{{ d.stale ? `Tidak terdengar ${fmtAge(d.silent_s)}` : "Terdengar" }}</span></div>
                 <div class="emeta">
                   <span title="RSSI">Kekuatan sinyal</span> {{ d.rssi_dbm ?? "—" }} dBm · {{ hopText(d.hop_count) }} · jarak ke base {{ diagStore.baseSet ? fmtDist(d.dist_to_base_m) : "(atur base di Setup lokasi)" }}<br />
                   <span title="PDR: persentase paket yang sampai ke base">Paket yang sampai</span> {{ d.pdr != null ? `${d.pdr}%` : "—" }} ({{ d.received }} diterima, {{ d.missing }} hilang) · <span title="Latency: selisih waktu paket diterima dengan waktu GPS alat">tunda data</span> {{ d.latency_p50_s != null ? `${d.latency_p50_s} dtk (p95 ${d.latency_p95_s} dtk)` : "—" }}<br />
@@ -134,11 +134,11 @@
               <div v-for="p in diagStore.packets.slice(0, 60)" :key="`${p.sequence}-${p.received_at}`" class="ev">
                 <div class="etit">
                   <span>#{{ p.sequence ?? "?" }} · {{ fmtClock(p.received_at) }}</span>
-                  <span class="bdg" :class="p.gps_valid ? 'ok' : 'bad'">{{ p.gps_valid ? "Ada fix GPS" : "Tanpa fix GPS" }}</span>
+                  <span class="bdg" :class="p.gps_valid ? 'ok' : 'neutral'">{{ p.gps_valid ? "Ada fix GPS" : "Tanpa fix GPS" }}</span>
                 </div>
                 <div class="emeta">
                   <span title="RSSI">Kekuatan sinyal</span> {{ p.rssi_dbm ?? "—" }} dBm · {{ fmtDist(p.dist_to_base_m) }} · {{ p.route_path || "langsung" }} ({{ hopText(p.hop_count) }})<br />
-                  {{ p.satellites ?? "—" }} satelit / <span title="HDOP">ketelitian GPS</span> {{ p.hdop ?? "—" }} · <span title="Latency">tunda data</span> {{ p.latency_s != null ? `${p.latency_s} dtk` : "—" }}<template v-if="p.missing_since_previous"> · <b style="color: var(--red)">{{ p.missing_since_previous }} paket hilang sebelumnya</b></template>
+                  {{ p.satellites ?? "—" }} satelit / <span title="HDOP">ketelitian GPS</span> {{ p.hdop ?? "—" }} · <span title="Latency">tunda data</span> {{ p.latency_s != null ? `${p.latency_s} dtk` : "—" }}<template v-if="p.missing_since_previous"> · <b style="color: var(--amber)">{{ p.missing_since_previous }} paket hilang sebelumnya</b></template>
                 </div>
               </div>
             </div>

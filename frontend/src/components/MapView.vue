@@ -370,7 +370,8 @@ function syncDem() {
   });
   map.addLayer({
     id: "dem-bounds", type: "line", source: "dem-bounds",
-    paint: { "line-color": "#9a9688", "line-width": 1.6, "line-dasharray": [3, 2] },
+    // Batas DEM = kuning (konvensi warna; sama dengan trail putus-putus). MapLibre paint butuh hex literal.
+    paint: { "line-color": "#e0b050", "line-width": 1.6, "line-dasharray": [3, 2] },
   });
   applyBasemap();
   map.fitBounds([[w, s], [e, n]], { padding: 40, duration: firstFit ? 0 : 800 });
@@ -395,7 +396,9 @@ function siteGeo() {
       const loss = r.loss_db ?? (r.margin_m < 3 ? 6 : 0); // rencana lama hanya punya margin
       f.push({
         type: "Feature",
-        properties: { kind: "link", color: r.link_ok === false ? "#c94f3d" : (r.fade_margin_db != null ? r.fade_margin_db < (st.params?.fade_margin_db ?? 10) : loss > 3) ? "#9a9688" : "#4f8065" },
+        // Warna link: tak-layak = merah literal #c94f3d (pengecualian terdokumentasi, bukan token SOS),
+        // marginal = oranye #e0953a (= --amber), kuat = hijau #4f8065. MapLibre paint butuh hex literal.
+        properties: { kind: "link", color: r.link_ok === false ? "#c94f3d" : (r.fade_margin_db != null ? r.fade_margin_db < (st.params?.fade_margin_db ?? 10) : loss > 3) ? "#e0953a" : "#4f8065" },
         geometry: { type: "LineString", coordinates: [nodes[r.parent ?? i], nodes[i + 1]] },
       });
     });

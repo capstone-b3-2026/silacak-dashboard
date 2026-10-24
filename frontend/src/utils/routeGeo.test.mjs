@@ -1,6 +1,6 @@
 // Tes logika rute (tanpa browser). Jalankan: node frontend/src/utils/routeGeo.test.mjs
 import assert from "node:assert/strict";
-import { buildRoute, parseRoute, routeFeatureCollection, unresolvedMessage } from "./routeGeo.js";
+import { buildRoute, haversineM, parseRoute, routeFeatureCollection, trailSegments, unresolvedMessage } from "./routeGeo.js";
 
 const base = { lat: -7.58, lon: 110.45 };
 const relays = [
@@ -64,5 +64,46 @@ const fc = routeFeatureCollection(buildRoute({ hiker, routePath: "R5>R6", device
 assert.equal(fc.features.filter((f) => f.properties.kind === "route").length, 1);
 assert.deepEqual(fc.features.filter((f) => f.properties.kind === "hop").map((f) => f.properties.slot), [2, 1]);
 assert.deepEqual(routeFeatureCollection(buildRoute({ hiker: null, routePath: "R5", devices, relays, base })).features, []);
+
+// ── haversineM (R = 6371008.8 m, konsisten dengan geo.py) ──
+assert.equal(haversineM([-7.6, 110.4], [-7.6, 110.4]), 0); // titik sama -> 0
+// 1 derajat lintang ~ 111195 m (R=6371008.8); toleransi 100 m
+assert.ok(Math.abs(haversineM([0, 0], [1, 0]) - 111195) < 100);
+// simetris
+assert.ok(Math.abs(haversineM([-7.58, 110.45], [-7.59, 110.46]) - haversineM([-7.59, 110.46], [-7.58, 110.45])) < 1e-6);
+// ~1 km di lintang -7.6 (bandingkan dengan tes geo.py Python): 0.009 derajat lintang ~ 1000 m
+assert.ok(Math.abs(haversineM([-7.6, 110.4], [-7.591, 110.4]) - 1000) < 5);
+// nilai sungguhan (number), bukan falsy kebetulan
+assert.equal(typeof haversineM([-7.6, 110.4], [-7.6, 110.4]), "number");
+
+// ── trailSegments ──
+const tsBase = { lat: -7.58, lon: 110.45 };
+// 0 titik -> total 0 & segments kosong
+let ts = trailSegments(tsBase, []);
+assert.equal(ts.totalM, 0);
+assert.deepEqual(ts.segments, []);
+// 1 titik tanpa base -> total 0, 0 segmen
+ts = trailSegments(null, [[-7.581, 110.451]]);
+assert.equal(ts.totalM, 0);
+assert.equal(ts.segments.length, 0);
+// base + 2 titik -> 2 segmen & total = jumlah m segmen
+ts = trailSegments(tsBase, [[-7.581, 110.451], [-7.583, 110.453]]);
+assert.equal(ts.segments.length, 2);
+assert.ok(Math.abs(ts.totalM - (ts.segments[0].m + ts.segments[1].m)) < 1e-9);
+assert.equal(ts.segments[0].fromLabel, "Base");
+assert.equal(ts.segments[0].toLabel, "Titik 1");
+assert.equal(ts.segments[1].toLabel, "Titik 2");
+assert.ok(ts.totalM > 0);
+// tanpa base + 2 titik -> 1 segmen
+ts = trailSegments(null, [[-7.581, 110.451], [-7.583, 110.453]]);
+assert.equal(ts.segments.length, 1);
+assert.equal(ts.segments[0].fromLabel, "Titik 1");
+assert.equal(ts.segments[0].toLabel, "Titik 2");
+// titik duplikat -> segmen 0 m
+ts = trailSegments(tsBase, [[-7.58, 110.45], [-7.58, 110.45]]);
+assert.equal(ts.segments.length, 2);
+assert.equal(ts.segments[1].m, 0); // titik1 == titik2
+// base null diperlakukan konsisten (predikat baseOk boolean sungguhan)
+assert.equal(trailSegments(undefined, []).totalM, 0);
 
 console.log("routeGeo: semua OK");

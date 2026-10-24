@@ -85,7 +85,7 @@
           <div class="lgnd">
             <div class="lg"><span class="sw circle" style="background: var(--marker)"></span>Pendaki</div>
             <div class="lg"><span class="sw circle" style="background: var(--red)"></span>SOS</div>
-            <div class="lg dim"><span class="sw circle" style="background: var(--accent)"></span>Relay (belum ada data)</div>
+            <div class="lg dim"><span class="sw circle" style="background: var(--violet)"></span>Relay (belum ada data)</div>
             <div class="lg dim"><span class="sw circle" style="background: var(--green)"></span>Base (belum ada data)</div>
             <div class="lg dim"><span class="sw line" style="background: var(--green)"></span>Link kuat (belum ada data)</div>
             <div class="lg dim"><span class="sw line" style="background: var(--amber)"></span>Link marginal (belum ada data)</div>

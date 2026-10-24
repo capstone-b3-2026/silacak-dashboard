@@ -13,7 +13,8 @@ from app.core import database
 from app.core.database import get_db
 from app.services import dem_ingest, link_calibration
 from app.services.terrain_planner import (
-    LinkParams, evaluate_relay_chain, haversine_km, make_link_params, predict_links, suggest_relay_chain,
+    LinkParams, evaluate_relay_chain, haversine_km, make_link_params, predict_links,
+    suggest_relay_chain, trail_profile_3d,
 )
 
 router = APIRouter(prefix="/sites", tags=["sites"])
@@ -21,7 +22,10 @@ router = APIRouter(prefix="/sites", tags=["sites"])
 DATA_DIR = os.environ.get("DATA_DIR", "/app/data")
 SITES_DIR = os.path.join(DATA_DIR, "sites")
 DEFAULT_PARAMS = {
-    "freq_mhz": 915.0, "antenna_h_m": 2.0, "max_hop_km": 2.0,
+    # freq_mhz: pita legal Indonesia 920–923 MHz (AS923, Permenkominfo 1/2019; C-251 §b/§c/§d).
+    # 922 = default patuh (915 = pita AS, non-patuh). Ini parameter MODEL planner (FSPL/Fresnel),
+    # BUKAN nilai yang dikirim ke alat; firmware memakai LORA_CHANNEL 70 (MHz aktual dicetak saat boot).
+    "freq_mhz": 922.0, "antenna_h_m": 2.0, "max_hop_km": 2.0,
     "search_radius_km": 0.3, "search_step_km": 0.06, "max_relays": 10,
     "relay_h_m": 2.0,  # tinggi antena relay & base (antena pendaki = antenna_h_m)
     "max_loss_db": 6.0,  # redaman difraksi maks yang masih dianggap link layak (lihat terrain_planner.py)
@@ -368,6 +372,44 @@ async def compute_plan(conn=Depends(get_db)):
     if not r or r["status"] != "ready":
         raise HTTPException(409, "DEM belum siap.")
     return await _run_plan(r["id"])
+
+
+# ── jarak trail 3D (profil dari DEM): sekunder, horizontal tetap dihitung di frontend ──
+def _trail_distance_blocking(dem_path: str, base: dict, trail: list) -> dict:
+    """Panggil fungsi murni trail_profile_3d dengan DEM sungguhan. Segmen di luar DEM -> 3D None
+    (tanpa menggagalkan respons); angka dibulatkan untuk UI."""
+    src = dem_ingest.GridElevation(dem_path)
+    res = trail_profile_3d(src, base, trail)
+    return {
+        "total_horizontal_m": round(res["total_horizontal_m"], 1),
+        "total_3d_m": None if res["total_3d_m"] is None else round(res["total_3d_m"], 1),
+        "incomplete": res["incomplete"],
+        "segments": [
+            {"from": s["from"], "to": s["to"], "horizontal_m": round(s["horizontal_m"], 1),
+             "dist_3d_m": None if s["dist_3d_m"] is None else round(s["dist_3d_m"], 1)}
+            for s in res["segments"]
+        ],
+    }
+
+
+class TrailDistanceBody(BaseModel):
+    base: dict | None = None
+    trail: list[list[float]] = []
+
+
+@router.post("/active/trail-distance")
+async def trail_distance(body: TrailDistanceBody, conn=Depends(get_db)):
+    """Jarak 3D (profil penuh dari DEM) sepanjang base -> trail. BONUS/sekunder: angka horizontal
+    headline dihitung instan di frontend; ini hanya menambah profil 3D saat DEM sudah siap."""
+    r = await _active(conn)
+    if not r:
+        raise HTTPException(404, "Belum ada lokasi. Upload DEM dulu.")
+    if r["status"] != "ready":
+        raise HTTPException(409, "DEM belum siap.")
+    if not body.base or len(body.trail) < 2:
+        raise HTTPException(400, "Isi titik base dan minimal 2 titik trail dulu.")
+    dem_path = os.path.join(SITES_DIR, str(r["id"]), "dem.tif")
+    return await asyncio.to_thread(_trail_distance_blocking, dem_path, body.base, body.trail)
 
 
 # ── data vegetasi (opsional): raster tinggi kanopi ──────────────────────────

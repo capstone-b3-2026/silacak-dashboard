@@ -180,5 +180,109 @@ class PenjarangJejak(unittest.TestCase):
         self.assertEqual(t[-1]["i"], 59999)
 
 
+class TrailProfil3D(unittest.TestCase):
+    """Tes trail_profile_3d: PROFIL penuh sepanjang segmen, bukan dua-ujung.
+
+    Sumber elevasi tiruan: fungsi elevasi dari posisi + opsi 'di luar DEM' (NaN) untuk lat tertentu.
+    Tidak menyentuh rasterio/DB — murni logika."""
+
+    class FlatElev:
+        """Medan datar: semua titik di dalam cakupan punya elevasi konstan."""
+        def __init__(self, elev_m=100.0):
+            self.elev_m = elev_m
+
+        def elevation_many(self, lats, lons):
+            import numpy as np
+            return np.full(np.shape(lats), self.elev_m, dtype=float)
+
+    class RampElev:
+        """Elevasi naik linear terhadap lintang (per derajat), untuk menguji 3D > horizontal."""
+        def __init__(self, slope_m_per_deg):
+            self.slope = slope_m_per_deg
+
+        def elevation_many(self, lats, lons):
+            import numpy as np
+            return np.asarray(lats, dtype=float) * self.slope
+
+    class HoleElev:
+        """Datar, tetapi titik dengan lon >= hole_lon dianggap di luar DEM (NaN)."""
+        def __init__(self, hole_lon, elev_m=100.0):
+            self.hole_lon = hole_lon
+            self.elev_m = elev_m
+
+        def elevation_many(self, lats, lons):
+            import numpy as np
+            lons = np.asarray(lons, dtype=float)
+            out = np.full(lons.shape, self.elev_m, dtype=float)
+            out[lons >= self.hole_lon] = np.nan
+            return out
+
+    def setUp(self):
+        from app.services.terrain_planner import trail_profile_3d
+        self.fn = trail_profile_3d
+
+    def test_3d_tidak_pernah_kurang_dari_horizontal(self):
+        res = self.fn(self.RampElev(2000.0), {"lat": -7.60, "lon": 110.40},
+                      [(-7.59, 110.40), (-7.58, 110.41)])
+        self.assertIsNotNone(res["total_3d_m"])
+        self.assertGreaterEqual(res["total_3d_m"], res["total_horizontal_m"])
+
+    def test_medan_datar_3d_mendekati_horizontal(self):
+        res = self.fn(self.FlatElev(), {"lat": -7.60, "lon": 110.40},
+                      [(-7.59, 110.40), (-7.59, 110.41)])
+        self.assertIsNotNone(res["total_3d_m"])
+        self.assertAlmostEqual(res["total_3d_m"], res["total_horizontal_m"], delta=0.01)
+
+    def test_segmen_datar_satu_km_sekitar_1000_m(self):
+        # ~1 km ke utara di lintang -7.6 (0.008993 derajat lintang ~ 1000 m), medan datar.
+        res = self.fn(self.FlatElev(), {"lat": -7.60, "lon": 110.40}, [(-7.591007, 110.40)])
+        self.assertEqual(len(res["segments"]), 1)
+        self.assertAlmostEqual(res["segments"][0]["dist_3d_m"], 1000, delta=5)
+        self.assertAlmostEqual(res["total_horizontal_m"], 1000, delta=5)
+
+    def test_segmen_di_luar_dem_jadi_none_dan_total_tidak_lengkap(self):
+        # Segmen kedua masuk ke lon >= 110.405 -> ada sub-titik di luar DEM.
+        res = self.fn(self.HoleElev(hole_lon=110.405), {"lat": -7.60, "lon": 110.40},
+                      [(-7.59, 110.40), (-7.59, 110.41)])
+        self.assertEqual(len(res["segments"]), 2)
+        self.assertIsNotNone(res["segments"][0]["dist_3d_m"])  # segmen dalam DEM tetap terhitung
+        self.assertIsNone(res["segments"][1]["dist_3d_m"])  # segmen keluar DEM -> None
+        self.assertTrue(res["incomplete"])
+        self.assertIsNone(res["total_3d_m"])
+        # Horizontal harus tetap lengkap walau 3D tidak.
+        self.assertGreater(res["total_horizontal_m"], 0)
+
+    def test_tanpa_base_mulai_dari_titik_pertama(self):
+        res = self.fn(self.FlatElev(), None, [(-7.60, 110.40), (-7.59, 110.40)])
+        self.assertEqual(len(res["segments"]), 1)
+        self.assertEqual(res["segments"][0]["from"], "Titik 1")
+        self.assertEqual(res["segments"][0]["to"], "Titik 2")
+
+    def test_kurang_dari_dua_titik_tidak_ada_segmen(self):
+        res = self.fn(self.FlatElev(), None, [(-7.60, 110.40)])
+        self.assertEqual(res["segments"], [])
+        self.assertEqual(res["total_horizontal_m"], 0.0)
+        self.assertEqual(res["total_3d_m"], 0.0)
+        self.assertFalse(res["incomplete"])
+
+    def test_profil_penuh_bukan_dua_ujung(self):
+        # Medan berbentuk lembah di tengah: dua-ujung (elev sama) akan menghitung 3D ~= horizontal,
+        # tetapi PROFIL penuh harus lebih panjang karena turun lalu naik di tengah segmen.
+        import numpy as np
+
+        class ValleyElev:
+            def elevation_many(self, lats, lons):
+                lats = np.asarray(lats, dtype=float)
+                # Lembah dalam & lebar: turun 1500 m di tengah lintasan lintang, kembali ke 100 m di ujung.
+                mid = (-7.60 + -7.55) / 2
+                return 100.0 - 1500.0 * np.exp(-((lats - mid) / 0.012) ** 2)
+
+        res = self.fn(ValleyElev(), {"lat": -7.60, "lon": 110.40}, [(-7.55, 110.40)])
+        # Dua ujung punya elevasi hampir sama (100 m), jadi pendekatan "dua-ujung" akan menghitung
+        # 3D ~= horizontal. Profil penuh melewati lembah -1500 m lalu naik lagi -> jauh lebih panjang,
+        # membuktikan perhitungan memakai SEMUA sub-titik, bukan sekadar dua ujung segmen.
+        self.assertGreater(res["segments"][0]["dist_3d_m"], res["total_horizontal_m"] + 300)
+
+
 if __name__ == "__main__":
     unittest.main()

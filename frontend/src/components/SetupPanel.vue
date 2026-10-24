@@ -95,6 +95,28 @@
                 {{ site.editMode === "trail" ? "Selesai" : "Gambar di peta" }}
               </button>
             </div>
+            <div class="dist" v-if="trailDist.segments.length">
+              <div class="dist-head">
+                <span class="lbl">Jarak horizontal</span>
+                <b>{{ (trailDist.totalM / 1000).toFixed(2) }} km</b>
+                <button class="lnk" type="button" @click="showSegments = !showSegments">
+                  {{ showSegments ? "sembunyikan rincian" : "rincian segmen" }}
+                </button>
+              </div>
+              <!-- Angka 3D sekunder (profil dari DEM). Sembunyi bila DEM belum siap / belum terhitung;
+                   angka horizontal di atas tetap tampil. -->
+              <div class="dist-sub" v-if="site.trail3d">
+                <span class="lbl">profil (dari DEM)</span>
+                <b v-if="trail3dText">{{ trail3dText }}</b>
+                <span class="note" v-if="site.trail3d.incomplete">sebagian jalur di luar cakupan DEM</span>
+              </div>
+              <ul v-if="showSegments" class="seg">
+                <li v-for="(s, i) in trailDist.segments" :key="i">
+                  <span>{{ s.fromLabel }} &rarr; {{ s.toLabel }}</span>
+                  <span>{{ fmtDist(s.m) }}</span>
+                </li>
+              </ul>
+            </div>
             <div class="row" v-if="site.site.trail.length">
               <button class="btn sm" @click="site.undoTrail()">Undo titik</button>
               <button class="btn sm danger" @click="site.clearTrail()">Hapus trail</button>
@@ -109,11 +131,11 @@
         <section class="pnl">
           <div class="ph"><span class="tl">3 · Parameter relay</span></div>
           <div class="pb grid2">
-            <label v-for="f in paramFields" :key="f.k"><span class="lbl">{{ f.label }}</span>
+            <label v-for="f in paramFields" :key="f.k"><span class="lbl">{{ f.label }}<ParamTip>{{ f.tip }}</ParamTip></span>
               <input class="inp" type="number" :step="f.step" v-model.number="site.site.params[f.k]" />
             </label>
             <p class="hint wide"><b>Anggaran daya tautan.</b> Bawaan = angka rencana C-251 (bukan hasil ukur). Isi dari datasheet, lalu <b>kalibrasi dari RSSI lapangan</b> (bagian 5).</p>
-            <label v-for="f in budgetFields" :key="f.k"><span class="lbl">{{ f.label }}</span>
+            <label v-for="f in budgetFields" :key="f.k"><span class="lbl">{{ f.label }}<ParamTip>{{ f.tip }}</ParamTip></span>
               <input class="inp" type="number" :step="f.step" v-model.number="site.site.params[f.k]" />
             </label>
             <div class="wide canopy">
@@ -263,9 +285,9 @@
             <select class="inp" v-model="form.role"><option>tracker</option><option>relay</option><option>base</option></select>
           </label>
           <label class="wide"><span class="lbl">Nama</span><input class="inp" v-model="form.name" placeholder="mis. Tracker Andi" /></label>
-          <label><span class="lbl">Interval lapor (dtk)</span><input class="inp" type="number" v-model.number="form.config.report_interval_s" /></label>
-          <label><span class="lbl">TX power (dBm)</span><input class="inp" type="number" v-model.number="form.config.tx_power_dbm" /></label>
-          <label><span class="lbl">Spreading factor</span><input class="inp" type="number" min="5" max="11" v-model.number="form.config.sf" /></label>
+          <label><span class="lbl">Interval lapor (dtk)<ParamTip>Selang node mengirim posisi. MISMATCH: firmware _optimized mengirim kontinu (jeda minimum 300 ms), _real tiap 5000 ms; angka '30 dtk' TIDAK ada di firmware. Lagipula downlink konfigurasi belum dimengerti firmware, jadi nilai ini BELUM sampai ke alat.</ParamTip></span><input class="inp" type="number" v-model.number="form.config.report_interval_s" /></label>
+          <label><span class="lbl">TX power (dBm)<ParamTip>Daya pancar node. MISMATCH: alat memakai POWER_22 = 22 dBm hardcoded; batas form ini (2–20) bahkan tak bisa mencapai 22. Downlink konfigurasi belum jalan, jadi nilai ini BELUM mengubah alat.</ParamTip></span><input class="inp" type="number" v-model.number="form.config.tx_power_dbm" /></label>
+          <label><span class="lbl">Spreading factor<ParamTip>Tukar jangkauan vs kecepatan. MISMATCH: firmware menyetel AIR_DATA_RATE_010_24 (2,4 kbps E220), bukan angka SF numerik; padanan 'SF9 = 2,4 kbps' adalah ASUMSI, bukan fakta datasheet. Nilai sf ini saat ini hanya katalog dashboard.</ParamTip></span><input class="inp" type="number" min="5" max="11" v-model.number="form.config.sf" /></label>
           <div class="row wide">
             <button class="btn primary grow" :disabled="dev.busy || !form.name || !form.node_id" @click="submit">
               {{ editId ? "Simpan perubahan" : "Tambah" }}
@@ -287,6 +309,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useSiteStore } from "../stores/site";
 import { useDeviceStore } from "../stores/devices";
 import { planGpxUrl } from "../services/api";
+import { trailSegments } from "../utils/routeGeo";
+import ParamTip from "./ParamTip.vue";
 
 const site = useSiteStore();
 const dev = useDeviceStore();
@@ -305,17 +329,40 @@ const picked = ref(null);
 const siteName = ref("");
 const dragOver = ref(false);
 const plan = computed(() => site.site?.plan);
+
+// Jarak horizontal trail (great-circle Haversine, konsisten dengan backend). Reaktif: dihitung ulang
+// tiap base/trail berubah karena handleMapClick/undoTrail/clearTrail mengganti array dengan salinan baru.
+const trailDist = computed(() => trailSegments(site.site?.base, site.site?.trail || []));
+const showSegments = ref(false);
+// Format jarak ramah operator: meter bila < 1 km, selebihnya km 2 desimal.
+function fmtDist(m) {
+  return m < 1000 ? `${Math.round(m)} m` : `${(m / 1000).toFixed(2)} km`;
+}
+// Angka 3D sekunder (profil dari DEM). null bila belum terhitung atau seluruh total tak tersedia
+// (mis. semua segmen di luar DEM) -> baris memakai catatan saja.
+const trail3dText = computed(() => {
+  const m = site.trail3d?.total_3d_m;
+  return m == null ? null : fmtDist(m);
+});
+
 const statusLabel = computed(
   () => ({ processing: "memproses", ready: "siap", error: "gagal" }[site.site?.status] || site.site?.status)
 );
 const budgetFields = [
-  { k: "tx_dbm", label: "Daya TX (dBm)", step: 1 },
-  { k: "sensitivity_dbm", label: "Sensitivitas (dBm)", step: 1 },
-  { k: "gain_hiker_dbi", label: "Gain antena pendaki (dBi)", step: 0.5 },
-  { k: "gain_relay_dbi", label: "Gain antena relay/base (dBi)", step: 0.5 },
-  { k: "fade_margin_db", label: "Margin fading (dB)", step: 0.5 },
-  { k: "veg_scale", label: "Skala vegetasi (0–1)", step: 0.1 },
-  { k: "calib_offset_db", label: "Offset kalibrasi (dB)", step: 0.5 },
+  { k: "tx_dbm", label: "Daya TX (dBm)", step: 1,
+    tip: "Daya pancar yang DIASUMSIKAN model. MISMATCH: alat nyata memakai POWER_22 = 22 dBm (hardcoded di firmware semua peran/varian); model default 21 dBm. Nilai ini hanya memengaruhi hitungan planner, bukan alat." },
+  { k: "sensitivity_dbm", label: "Sensitivitas (dBm)", step: 1,
+    tip: "RSSI terlemah yang masih bisa didecode. Makin negatif = makin peka = jangkauan naik. C-251: SF9 ~ -137 dBm, SF11 ~ -148 dBm; cek datasheet E220 untuk angka pasti." },
+  { k: "gain_hiker_dbi", label: "Gain antena pendaki (dBi)", step: 0.5,
+    tip: "Penguatan antena pendaki. Naik = jangkauan naik. Isi dari spesifikasi antena fisik." },
+  { k: "gain_relay_dbi", label: "Gain antena relay/base (dBi)", step: 0.5,
+    tip: "Penguatan antena relay/base. Isi dari spesifikasi antena fisik." },
+  { k: "fade_margin_db", label: "Margin fading (dB)", step: 0.5,
+    tip: "Cadangan daya di atas sensitivitas untuk melawan fading. Naik = rencana lebih aman tapi jangkauan efektif turun. Praktik rekayasa; setel dari sebaran shadowing lapangan." },
+  { k: "veg_scale", label: "Skala vegetasi (0–1)", step: 0.1,
+    tip: "Pengali redaman vegetasi di model. Terkait data kanopi, bukan alat." },
+  { k: "calib_offset_db", label: "Offset kalibrasi (dB)", step: 0.5,
+    tip: "Redaman tambahan hasil kalibrasi RSSI lapangan. Dari proses kalibrasi, bukan datasheet." },
 ];
 // warna margin fading: merah = link putus, abu = di bawah margin yang disyaratkan, hijau = cukup
 function marginClass(r) {
@@ -323,15 +370,24 @@ function marginClass(r) {
   return r.fade_margin_db < (site.site?.params?.fade_margin_db ?? 10) ? "warn" : "ok";
 }
 const paramFields = [
-  { k: "freq_mhz", label: "Frekuensi (MHz)", step: 1 },
-  { k: "antenna_h_m", label: "Antena pendaki (m)", step: 0.5 },
-  { k: "relay_h_m", label: "Antena relay (m)", step: 0.5 },
-  { k: "max_hop_km", label: "Hop maks (km)", step: 0.1 },
-  { k: "max_loss_db", label: "Redaman medan maks (dB)", step: 0.5 },
-  { k: "dem_error_m", label: "Cadangan galat DEM (m)", step: 0.5 },
-  { k: "max_relays", label: "Relay maks", step: 1 },
-  { k: "search_radius_km", label: "Radius cari (km)", step: 0.05 },
-  { k: "search_step_km", label: "Langkah cari (km)", step: 0.01 },
+  { k: "freq_mhz", label: "Frekuensi (MHz)", step: 1,
+    tip: "Frekuensi kerja yang dipakai MODEL planner (menggeser FSPL/Fresnel/redaman vegetasi). Naik = rugi lintasan lebih besar (jangkauan model turun). Pita legal Indonesia 920–923 MHz (C-251, Permenkominfo 1/2019); default 922. Firmware memakai LORA_CHANNEL 70 — frekuensi MHz aktualnya tercetak di Serial saat boot (config.h:18), belum terkonfirmasi sama persis dengan nilai ini; channel 70 pada E220 kemungkinan ~920 MHz tapi ini ASUMSI dari rumus umum, bukan fakta terukur. Semua node WAJIB di kanal yang sama atau tak saling dengar." },
+  { k: "antenna_h_m", label: "Antena pendaki (m)", step: 0.5,
+    tip: "Tinggi antena node pendaki di atas tanah. Naik = garis pandang lebih baik, jangkauan naik. Samakan dengan tinggi pasang fisik di lapangan." },
+  { k: "relay_h_m", label: "Antena relay (m)", step: 0.5,
+    tip: "Tinggi antena relay/base. Naik = jangkauan naik. Isi dengan tinggi tiang fisik sebenarnya." },
+  { k: "max_hop_km", label: "Hop maks (km)", step: 0.1,
+    tip: "Jarak satu lompatan yang dianggap mungkin oleh planner. Terlalu besar = rencana optimistis. Acuan C-251: LOS >= 1 km, NLOS >= 300 m — setel realistis terhadap jangkauan alat." },
+  { k: "max_loss_db", label: "Redaman medan maks (dB)", step: 0.5,
+    tip: "Ambang kepercayaan model difraksi (batas MODEL, bukan anggaran daya). Di atas ini link dianggap tak layak. Batas model, bukan batas alat." },
+  { k: "dem_error_m", label: "Cadangan galat DEM (m)", step: 0.5,
+    tip: "Medan dianggap setinggi ini lebih tinggi (cadangan galat DEM). Naik = rencana lebih konservatif. Terkait kualitas DEM, bukan alat." },
+  { k: "max_relays", label: "Relay maks", step: 1,
+    tip: "Batas jumlah relay yang dicari planner. Isi sesuai jumlah relay fisik yang tersedia." },
+  { k: "search_radius_km", label: "Radius cari (km)", step: 0.05,
+    tip: "Sejauh apa kandidat relay dicari dari jalur. Naik = lebih banyak kandidat, hitungan lebih lama." },
+  { k: "search_step_km", label: "Langkah cari (km)", step: 0.01,
+    tip: "Kerapatan grid kandidat relay. Makin kecil = makin teliti tapi lebih lambat." },
 ];
 
 function setFile(f) {
@@ -453,6 +509,22 @@ label { display: flex; flex-direction: column; gap: 5px; }
 .hint { font-size: 14px; line-height: 1.55; color: var(--text-2); }
 .hint b { font-size: inherit; }
 .hint.hot { color: var(--text); font-weight: 600; }
+
+/* Jarak trail: angka horizontal headline + profil 3D sekunder dari DEM. Catatan "tidak lengkap"
+   memakai amber (peringatan), BUKAN merah (merah = SOS saja). Token fase2: --line, --text-2, --amber. */
+.dist { margin-top: 2px; padding: 8px 10px; background: var(--line); border-radius: 9px; display: flex; flex-direction: column; gap: 5px; }
+.dist-head { display: flex; align-items: baseline; gap: 8px; }
+.dist-head .lbl { flex-shrink: 0; }
+.dist-head b { font-size: 15px; color: var(--text); font-variant-numeric: tabular-nums; }
+.dist-sub { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; color: var(--text-2); }
+.dist-sub .lbl { flex-shrink: 0; }
+.dist-sub b { font-size: 14px; font-variant-numeric: tabular-nums; color: var(--text); }
+.dist-sub .note { font-size: 13px; color: var(--amber); }
+.lnk { margin-left: auto; background: none; border: none; padding: 0; color: var(--text-2); font-size: 13px; text-decoration: underline; cursor: pointer; }
+.lnk:hover { color: var(--text); }
+.seg { list-style: none; margin: 0; padding: 5px 0 0; display: flex; flex-direction: column; gap: 3px; border-top: 1px solid var(--line-2); }
+.seg li { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+
 .err { font-size: 14px; line-height: 1.5; color: var(--red); background: var(--red-bg); border: 1px solid var(--red-line); border-radius: 9px; padding: 8px 10px; }
 .err b { font-size: inherit; color: inherit; }
 .err.sm { font-size: 14px; }

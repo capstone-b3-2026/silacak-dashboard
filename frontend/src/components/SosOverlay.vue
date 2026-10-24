@@ -195,7 +195,9 @@ function acknowledgeAll() {
   font-size: 11px; font-weight: 800; flex-shrink: 0; background: var(--red); color: #fff;
   border-radius: 999px; padding: 5px 8px; line-height: 1;
 }
-.sos-card.warn .sos-icon { background: var(--accent); color: var(--on-btn); border-radius: 6px; }
+/* Kartu "tidak terdengar"/"baterai rendah" = peringatan, ikon oranye-amber (bukan oranye-trail --accent,
+   dan bukan merah SOS). SOS asli di kartu non-.warn tetap merah. */
+.sos-card.warn .sos-icon { background: var(--amber); color: #fff; border-radius: 6px; }
 .sos-text { display: flex; flex-direction: column; font-size: 12px; line-height: 1.35; flex: 1; min-width: 0; color: var(--text-2); }
 .sos-text strong { font-size: 13px; color: var(--text); }
 .sos-text span { text-transform: none; }
