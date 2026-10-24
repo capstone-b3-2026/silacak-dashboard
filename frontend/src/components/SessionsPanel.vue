@@ -1,12 +1,12 @@
 <template>
   <div class="pnl">
-    <div class="ph ph-toggle" @click="toggle" role="button" :aria-expanded="open" title="Buka/tutup panel sesi">
+    <div class="ph ph-toggle" @click="toggle" role="button" tabindex="0" :aria-expanded="open" title="Buka/tutup panel sesi" @keydown.enter.prevent="toggle" @keydown.space.prevent="toggle">
       <div class="tl">
-        <svg class="chev" :class="{ open }" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
-        sesi pendakian
+        <svg class="ic" viewBox="0 0 24 24"><path d="M3 20l6-11 4 6 3-4 5 9z" /></svg>
+        Sesi pendakian
         <span v-if="store.unregistered.length" class="bdg bad" style="margin-left: 6px">{{ store.unregistered.length }} belum check-in</span>
       </div>
-      <div class="sv">{{ store.active.length }} aktif</div>
+      <div class="sv"><svg class="chev" :class="{ open }" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>{{ store.active.length }} aktif</div>
     </div>
     <div class="pb">
       <!-- banner: alat kirim data tapi belum di-check-in. Sengaja di luar bagian yang bisa dilipat:
@@ -30,6 +30,7 @@
       <div v-else class="sess-list">
         <div v-for="s in list" :key="s.id" class="sess">
           <div class="sess-top">
+            <span class="sess-ic" :class="{ warn: s.auto_opened }" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg></span>
             <strong>{{ s.full_name || "Belum check-in" }}</strong>
             <span class="bdg" :class="s.auto_opened ? 'bad' : 'ok'">{{ s.hiker_code }}</span>
           </div>
@@ -42,6 +43,7 @@
           <div v-if="s.emergency_contact" class="emeta">Kontak darurat: {{ s.emergency_contact }}</div>
           <div class="sess-act">
             <a class="mini" :href="sessionGpxUrl(s.id)" download>Unduh GPX</a>
+            <a class="mini" :href="sessionCsvUrl(s.id)" download title="Semua paket sesi ini (Excel/CSV): untuk laporan dan analisis sinyal">Unduh CSV</a>
             <button v-if="s.status === 'active'" class="mini warn" @click="doCheckOut(s)">Check-out</button>
           </div>
         </div>
@@ -56,7 +58,7 @@
         <input v-model="form.emergency_contact" placeholder="Kontak darurat (opsional)" />
         <input v-model="form.trail_name" placeholder="Jalur (opsional)" />
         <div v-if="error" class="sess-err">{{ error }}</div>
-        <button class="ack-btn" style="background: var(--blue); width: 100%" :disabled="busy">{{ busy ? "..." : "Mulai sesi" }}</button>
+        <button class="ack-btn" style="width: 100%" :disabled="busy">{{ busy ? "..." : "Mulai sesi" }}</button>
       </form>
       </div>
     </div>
@@ -65,11 +67,11 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { fetchHikers, sessionGpxUrl } from "../services/api";
+import { fetchHikers, sessionCsvUrl, sessionGpxUrl } from "../services/api";
 import { useSessionStore } from "../stores/sessions";
 
 const store = useSessionStore();
-const open = ref(localStorage.getItem("silacak.sessOpen") === "1"); // default terlipat
+const open = ref(localStorage.getItem("silacak.sessOpen") !== "0"); // default terbuka: check-in adalah tugas harian operator
 function toggle() {
   open.value = !open.value;
   localStorage.setItem("silacak.sessOpen", open.value ? "1" : "0");
@@ -138,23 +140,29 @@ async function doCheckOut(s) {
 <style scoped>
 .ph-toggle { cursor: pointer; user-select: none; }
 .ph-toggle:hover .tl { color: var(--text-2); }
-.chev { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; margin-right: 5px; transition: transform 0.15s; vertical-align: -1px; }
+.ph-toggle .sv { display: inline-flex; align-items: center; gap: 4px; }
+.chev { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s; }
 .chev.open { transform: rotate(90deg); }
-.sess-warn { border: 1px solid rgba(196, 80, 80, 0.3); background: rgba(196, 80, 80, 0.08); border-radius: 9px; padding: 6px 8px; font-size: 9.5px; margin-bottom: 7px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
-.lnk-btn { background: none; border: none; color: var(--blue); cursor: pointer; font-size: 9.5px; text-decoration: underline; }
-.sess-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 7px; }
-.sess-tabs button { height: 26px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--muted); font-size: 9px; font-weight: 700; cursor: pointer; }
-.sess-tabs button.on { color: var(--text); border-color: var(--line-2); background: var(--panel); }
-.sess-list { display: flex; flex-direction: column; gap: 5px; max-height: 240px; overflow-y: auto; }
-.sess { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 6px 8px; }
-.sess-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; font-size: 10.5px; margin-bottom: 2px; }
-.sess-act { display: flex; gap: 5px; margin-top: 5px; }
-.mini { font-size: 9px; font-weight: 700; padding: 3px 8px; border-radius: 6px; border: 1px solid var(--line-2); background: transparent; color: var(--text-2); cursor: pointer; text-decoration: none; }
+.sess-warn { border: 1px solid var(--red); background: var(--red-bg); border-radius: 10px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.lnk-btn { background: none; border: none; color: var(--blue-fg); cursor: pointer; font-size: 13px; text-decoration: underline; }
+.sess-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
+.sess-tabs button { height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text-2); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.sess-tabs button.on { color: var(--on-btn); border-color: var(--btn); background: var(--btn); }
+.sess-list { display: flex; flex-direction: column; gap: 0; max-height: 240px; overflow-y: auto; }
+.sess { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 2px; }
+.sess:first-child { border-top: 0; }
+.sess-top { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 4px; }
+.sess-top strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sess-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex-shrink: 0; background: var(--green-bg); color: var(--green); }
+.sess-ic.warn { background: var(--red-bg); color: var(--red); }
+.sess-ic svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.sess-act { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.mini { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-3); background: transparent; color: var(--text-2); cursor: pointer; text-decoration: none; font-family: inherit; }
 .mini:hover { color: var(--text); background: var(--panel-2); }
-.mini.warn { color: var(--red); border-color: rgba(196, 80, 80, 0.35); }
-.sess-form { display: flex; flex-direction: column; gap: 5px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line); }
-.sess-ft { font-size: 8.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-.sess-form input { height: 28px; border-radius: 8px; border: 1px solid var(--line-2); background: var(--panel-3); color: var(--text); padding: 0 9px; font-size: 10.5px; font-family: inherit; }
-.sess-form input:focus { outline: none; border-color: var(--blue); }
-.sess-err { color: var(--red); font-size: 9.5px; }
+.mini.warn { color: var(--red); border-color: var(--red); }
+.sess-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.sess-ft { font-size: 13px; font-weight: 700; color: var(--text); }
+.sess-form input { height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text); padding: 0 10px; font-size: 14px; font-family: inherit; }
+.sess-form input:focus { outline: none; border-color: var(--accent); }
+.sess-err { color: var(--red); font-size: 13px; }
 </style>

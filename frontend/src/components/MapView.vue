@@ -2,32 +2,32 @@
   <div id="map" ref="mapContainer"></div>
 
   <div class="map-ctl floating">
-    <button class="mbtnn" @click="map?.zoomIn()" title="Zoom in">
+    <button class="mbtnn" @click="map?.zoomIn()" title="Perbesar peta" aria-label="Perbesar peta">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
     </button>
-    <button class="mbtnn" @click="map?.zoomOut()" title="Zoom out">
+    <button class="mbtnn" @click="map?.zoomOut()" title="Perkecil peta" aria-label="Perkecil peta">
       <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" /></svg>
     </button>
     <div class="msep"></div>
-    <button class="mbtnn fit-btn" @click="fitAll" title="Fit ke semua pendaki">FIT</button>
+    <button class="mbtnn fit-btn pri" @click="fitAll" title="Tampilkan semua pendaki di layar" aria-label="Tampilkan semua pendaki">Semua</button>
     <div class="msep"></div>
     <button
-      class="mbtnn fit-btn" :class="{ on3d: is3d }" :disabled="!siteStore.ready" @click="toggle3d"
-      :title="siteStore.ready ? 'Ganti tampilan 2D / 3D' : 'Upload DEM di Setup untuk mengaktifkan 3D'"
+      class="mbtnn fit-btn" :class="{ on3d: is3d }" :aria-pressed="is3d" :disabled="!siteStore.ready" @click="toggle3d"
+      :title="siteStore.ready ? 'Ganti tampilan 2D / 3D' : 'Upload DEM di Setup (Mode lanjutan) untuk mengaktifkan 3D'"
     >
-      {{ is3d ? "3D" : "2D" }}
+      <span class="seg" :class="{ on: !is3d }">2D</span><span class="seg-sl">/</span><span class="seg" :class="{ on: is3d }">3D</span>
     </button>
     <button v-if="is3d" class="mbtnn fit-btn" @click="resetNorth" title="Balik menghadap utara">N</button>
     <button
       class="mbtnn fit-btn" :disabled="!topoReady" @click="toggleBasemap"
       :title="topoReady ? 'Ganti dasar peta: OSM (online) / Topo (offline, dari DEM)' : 'Peta topo offline belum ada — upload DEM di Setup'"
-    >{{ basemap === "topo" ? "TOPO" : "OSM" }}</button>
+    ><span class="seg" :class="{ on: basemap !== 'topo' }">OSM</span><span class="seg-sl">/</span><span class="seg" :class="{ on: basemap === 'topo' }">TOPO</span></button>
     <div class="msep"></div>
-    <button class="mbtnn fit-btn" :class="{ on3d: siteStore.showSetup }" @click="siteStore.showSetup = !siteStore.showSetup" title="Setup lokasi, DEM &amp; perangkat">SETUP</button>
-    <button class="mbtnn" @click="$emit('toggle-theme')" title="Ganti tema terang/gelap">
-      <svg v-if="theme === 'dark'" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
-      <svg v-else viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
-    </button>
+    <button v-if="uiStore.advanced" class="mbtnn fit-btn" :class="{ on3d: siteStore.showSetup }" :aria-pressed="siteStore.showSetup" @click="siteStore.showSetup = !siteStore.showSetup" title="Pengaturan lanjutan: lokasi, DEM, relay &amp; perangkat"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></svg>Setup</button>
+    <button
+      class="mbtnn fit-btn" :class="{ on3d: uiStore.advanced }" :aria-pressed="uiStore.advanced" @click="toggleMode"
+      :title="uiStore.advanced ? 'Kembali ke tampilan harian (peta, pendaki, check-in, alarm)' : 'Buka pengaturan lanjutan: Setup lokasi, diagnostik link, data &amp; cadangan'"
+    >{{ uiStore.advanced ? "Mode lanjutan" : "Mode harian" }}</button>
   </div>
 
   <div v-if="is3d" class="map-hint floating">
@@ -37,7 +37,7 @@
   <div v-if="notice" class="map-empty floating warn-toast">{{ notice }}</div>
 
   <div v-if="pendakiAktif === 0" class="map-empty floating">
-    Belum ada data posisi masuk — jalankan simulator atau tunggu data dari gateway.
+    Belum ada data posisi masuk. Colok base ke laptop dan pastikan alat pendaki menyala, atau jalankan simulator.
   </div>
 </template>
 
@@ -49,6 +49,7 @@ import { useHikerStore } from "../stores/hikers";
 import { useAlertStore } from "../stores/alerts";
 import { useSiteStore } from "../stores/site";
 import { useDeviceStore } from "../stores/devices";
+import { useUiStore } from "../stores/ui";
 import { buildRoute, routeFeatureCollection, unresolvedMessage } from "../utils/routeGeo";
 
 const props = defineProps({ theme: { type: String, default: "dark" } });
@@ -58,6 +59,7 @@ const mapContainer = ref(null);
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
 const siteStore = useSiteStore();
+const uiStore = useUiStore();
 const deviceStore = useDeviceStore(); // untuk memetakan ID relay di route_path ke posisinya
 const is3d = ref(false);
 let map = null;
@@ -73,6 +75,16 @@ let siteMarkers = []; // marker base & relay
 let demTopo = false; // apakah layer topo sudah terpasang untuk demId
 let demId = null; // id site yang DEM-nya sedang terpasang di peta
 
+// Pindah mode. Keluar dari mode lanjutan = tutup Setup & matikan mode klik-peta/geser relay,
+// supaya peta tidak bisa terubah tanpa sengaja saat tampilan harian.
+function toggleMode() {
+  if (uiStore.advanced) {
+    siteStore.showSetup = false;
+    siteStore.editMode = null;
+  }
+  uiStore.toggleAdvanced();
+}
+
 const pendakiAktif = computed(() => Object.keys(hikerStore.hikers).length);
 
 // Sebelum ada DEM aktif, peta mulai di sini. Begitu DEM siap, peta otomatis
@@ -82,7 +94,7 @@ const START_CENTER = [110.453, -7.578];
 // Palet jejak SENGAJA hanya warna dingin (toska/biru) yang belum punya arti lain di UI. Jangan tambahkan merah/merah muda
 // (SOS), oranye/kuning (link marginal, jalur lokasi), hijau (link kuat, base), atau ungu (relay).
 // 7 entri: H01, H02, H03, H11, H12 jatuh di indeks berbeda (tidak kembar).
-const TRAIL_COLORS = ["#1aa3a3", "#3b6fd0", "#22b8cf", "#8fb0ff", "#5f7d95", "#6bb6ff", "#7fd6e6"];
+const TRAIL_COLORS = ["#1f8a8a", "#6b4f9e", "#2a7ca3", "#8a6d3b", "#4f6d7a", "#a05a8c", "#5b8c5a"];
 function colorFor(code) {
   let h = 0;
   for (let i = 0; i < code.length; i++) h = (h * 31 + code.charCodeAt(i)) >>> 0;
@@ -102,7 +114,7 @@ function markerHtml(code, sos, selected) {
 function popupHtml(code, h, sos) {
   const bat = h.battery_pct != null ? `<br>bat ${h.battery_pct}%` : "";
   const alt = h.elevation != null ? `<br>${h.elevation} m` : "";
-  return `<b>${code}</b>${sos ? " 🆘" : ""}${alt}${bat}`;
+  return `<b>${code}</b>${sos ? " (SOS)" : ""}${alt}${bat}`;
 }
 
 function rasterPaint() {
@@ -341,9 +353,9 @@ function syncDem() {
       source: "dem",
       paint: {
         "hillshade-exaggeration": 0.55,
-        "hillshade-shadow-color": "#0b1410",
+        "hillshade-shadow-color": "#101f19",
         "hillshade-highlight-color": "#ffffff",
-        "hillshade-accent-color": "#1d2b22",
+        "hillshade-accent-color": "#172b22",
       },
     },
     map.getLayer("tracks") ? "tracks" : undefined
@@ -358,7 +370,7 @@ function syncDem() {
   });
   map.addLayer({
     id: "dem-bounds", type: "line", source: "dem-bounds",
-    paint: { "line-color": "#e0b050", "line-width": 1.6, "line-dasharray": [3, 2] },
+    paint: { "line-color": "#9a9688", "line-width": 1.6, "line-dasharray": [3, 2] },
   });
   applyBasemap();
   map.fitBounds([[w, s], [e, n]], { padding: 40, duration: firstFit ? 0 : 800 });
@@ -383,7 +395,7 @@ function siteGeo() {
       const loss = r.loss_db ?? (r.margin_m < 3 ? 6 : 0); // rencana lama hanya punya margin
       f.push({
         type: "Feature",
-        properties: { kind: "link", color: r.link_ok === false ? "#d04a4a" : (r.fade_margin_db != null ? r.fade_margin_db < (st.params?.fade_margin_db ?? 10) : loss > 3) ? "#c8883a" : "#5aaa5a" },
+        properties: { kind: "link", color: r.link_ok === false ? "#c94f3d" : (r.fade_margin_db != null ? r.fade_margin_db < (st.params?.fade_margin_db ?? 10) : loss > 3) ? "#9a9688" : "#4f8065" },
         geometry: { type: "LineString", coordinates: [nodes[r.parent ?? i], nodes[i + 1]] },
       });
     });
@@ -455,7 +467,7 @@ onMounted(() => {
     map.addLayer({
       id: "site-trail", type: "line", source: "site", filter: ["==", ["get", "kind"], "trail"],
       layout: { "line-join": "round", "line-cap": "round" },
-      paint: { "line-color": "#e0b050", "line-width": 2.5, "line-dasharray": [2, 1.5] },
+      paint: { "line-color": "#e99a26", "line-width": 2.5, "line-dasharray": [2, 1.5] },
     });
     map.addLayer({
       id: "site-link", type: "line", source: "site", filter: ["==", ["get", "kind"], "link"],
@@ -464,23 +476,23 @@ onMounted(() => {
     });
     map.addLayer({
       id: "site-pts", type: "circle", source: "site", filter: ["==", ["get", "kind"], "pt"],
-      paint: { "circle-radius": 3.5, "circle-color": "#e0b050", "circle-stroke-color": "#fff", "circle-stroke-width": 1 },
+      paint: { "circle-radius": 3.5, "circle-color": "#e99a26", "circle-stroke-color": "#fff", "circle-stroke-width": 1 },
     });
     // rute paket: garis putus-putus terang berbingkai gelap (terbaca di tema gelap maupun terang) + cincin di relay yang dilewati
     map.addSource("route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
     map.addLayer({
       id: "route-casing", type: "line", source: "route", filter: ["==", ["get", "kind"], "route"],
       layout: { "line-join": "round", "line-cap": "round" },
-      paint: { "line-color": "#0f1521", "line-width": 6, "line-opacity": 0.55 },
+      paint: { "line-color": "#ffffff", "line-width": 6, "line-opacity": 0.7 },
     });
     map.addLayer({
       id: "route-line", type: "line", source: "route", filter: ["==", ["get", "kind"], "route"],
       layout: { "line-join": "round", "line-cap": "round" },
-      paint: { "line-color": "#f5f7fb", "line-width": 2.5, "line-dasharray": [2, 1.5] },
+      paint: { "line-color": "#214f38", "line-width": 2.5, "line-dasharray": [2, 1.5] },
     });
     map.addLayer({
       id: "route-hops", type: "circle", source: "route", filter: ["==", ["get", "kind"], "hop"],
-      paint: { "circle-radius": 13, "circle-opacity": 0, "circle-stroke-color": "#f5f7fb", "circle-stroke-width": 2.5 },
+      paint: { "circle-radius": 13, "circle-opacity": 0, "circle-stroke-color": "#214f38", "circle-stroke-width": 2.5 },
     });
     mapReady = true;
     if (!navigator.onLine && basemap.value === "osm") basemap.value = "topo"; // browser sudah tahu sedang offline
@@ -527,19 +539,29 @@ watch(
 </script>
 
 <style scoped>
-#map { position: absolute; inset: 0; z-index: 0; background: var(--bg); }
+/* peta = kartu membulat di antara dua panel, di bawah topbar */
+#map {
+  position: absolute; z-index: 0; background: var(--bg);
+  top: var(--top); bottom: var(--edge);
+  left: calc(var(--lw) + 2 * var(--edge)); right: calc(var(--rw) + 2 * var(--edge));
+  border-radius: var(--radius); border: 1px solid var(--line); overflow: hidden;
+}
 
 .map-empty {
-  position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
-  z-index: 20; color: var(--text-2); font-size: 12px; padding: 8px 14px;
-  border-radius: 10px; max-width: min(80vw, 420px); text-align: center;
+  position: absolute; top: calc(var(--top) + 12px); left: calc(var(--lw) + (100vw - var(--lw) - var(--rw)) / 2); transform: translateX(-50%);
+  z-index: 20; color: var(--text-2); font-size: 14px; padding: 8px 14px;
+  border-radius: 10px; max-width: min(60vw, 420px); text-align: center; background: var(--panel-2); border: 1px solid var(--line);
 }
 .map-hint {
-  position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-  z-index: 20; color: var(--text-2); font-size: 10.5px; padding: 6px 12px;
-  border-radius: 10px; white-space: nowrap; pointer-events: none;
+  position: absolute; bottom: 84px; left: calc(var(--lw) + (100vw - var(--lw) - var(--rw)) / 2); transform: translateX(-50%);
+  z-index: 20; color: var(--text-2); font-size: 13px; padding: 6px 12px;
+  border-radius: 10px; white-space: nowrap; pointer-events: none; background: var(--panel-2); border: 1px solid var(--line);
 }
-.on3d { color: var(--blue) !important; }
-.warn-toast { color: var(--amber); border-color: var(--amber); }
+.on3d { color: var(--blue-fg) !important; }
+.warn-toast { color: var(--text); border-color: var(--accent); }
 .mbtnn:disabled { opacity: 0.4; cursor: not-allowed; }
+@media (max-width: 1100px) {
+  #map { position: relative !important; inset: auto; margin: 8px; min-height: 52vh; }
+  .map-empty, .map-hint { left: 50%; }
+}
 </style>

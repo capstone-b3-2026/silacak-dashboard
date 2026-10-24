@@ -10,12 +10,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import alerts, app_config, base, devices, diagnostics, gpx, hikers, positions, sites, stream, terrain, sessions
+from app.api.v1 import alerts, app_config, base, devices, diagnostics, export, gpx, hikers, positions, sites, stream, terrain, sessions
 from app.core import database
 from app.core.schema import ensure_schema
 from app.core.config import settings
 from app.core.scheduler import scheduler, start_scheduler
-from app.services import app_settings
+from app.services import app_settings, sos_watch
 from app.services.notifier import notifier
 from app.services.serial_ingest import serial_ingest
 
@@ -43,6 +43,7 @@ app.include_router(diagnostics.router, prefix="/api/v1")
 app.include_router(stream.router, prefix="/api/v1")
 app.include_router(base.router, prefix="/api/v1")
 app.include_router(app_config.router, prefix="/api/v1")
+app.include_router(export.router, prefix="/api/v1")
 
 # Tile elevasi hasil upload DEM disajikan langsung dari folder data/sites
 os.makedirs(sites.SITES_DIR, exist_ok=True)
@@ -55,9 +56,9 @@ def _on_position_notify(connection, pid, channel, payload: str) -> None:
     """Callback asyncpg LISTEN - dipanggil tiap ada INSERT baru ke table
     positions (lewat trigger pg_notify di init.sql). Forward langsung ke
     semua client SSE, jadi backend nggak perlu polling DB tiap detik."""
-    asyncio.create_task(
-        notifier.broadcast(json.dumps({"type": "position", "data": json.loads(payload)}))
-    )
+    data = json.loads(payload)
+    asyncio.create_task(notifier.broadcast(json.dumps({"type": "position", "data": data})))
+    asyncio.create_task(sos_watch.handle_position(data))  # tombol SOS pendaki -> alarm MANUAL_SOS (jalur apa pun)
 
 
 @app.on_event("startup")

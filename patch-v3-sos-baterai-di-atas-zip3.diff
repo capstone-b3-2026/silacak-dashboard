@@ -1,0 +1,491 @@
+diff -ruN -x __pycache__ -x node_modules -x dist -x .git -x '*.pyc' a/backend/app/core/schema.py b/backend/app/core/schema.py
+--- a/backend/app/core/schema.py	2026-10-24 03:57:02.857384452 +0000
++++ b/backend/app/core/schema.py	2026-10-24 03:57:02.909361181 +0000
+@@ -216,6 +216,7 @@
+ ALTER TABLE positions ADD COLUMN IF NOT EXISTS time_from_gps BOOLEAN NOT NULL DEFAULT FALSE;  -- recorded_at asli dari GPS? (syarat hitung latency)
+ ALTER TABLE positions ADD COLUMN IF NOT EXISTS speed_kph REAL;           -- speed_kph dari CSV_DATA (NULL = bit SpeedValid tidak di-set)
+ ALTER TABLE positions ADD COLUMN IF NOT EXISTS rtt_ms INTEGER;           -- RTT diukur pendaki, dari baris CSV_TIMING (NULL = laporan tidak sampai)
++ALTER TABLE positions ADD COLUMN IF NOT EXISTS sos BOOLEAN NOT NULL DEFAULT FALSE;  -- tombol SOS pendaki aktif saat paket ini dikirim (field ke-20 CSV_DATA)
+ 
+ -- sama dengan versi di init.sql + session_id (dipakai dashboard buat tahu kalau sesi berganti)
+ CREATE OR REPLACE FUNCTION notify_position_insert() RETURNS trigger AS $$
+@@ -238,6 +239,7 @@
+             'satellites', NEW.satellites,
+             'hdop', NEW.hdop,
+             'gps_valid', NEW.gps_valid,
++            'sos', NEW.sos,
+             'recorded_at', NEW.recorded_at,
+             'received_at', NEW.received_at
+         )::text
+diff -ruN -x __pycache__ -x node_modules -x dist -x .git -x '*.pyc' a/backend/app/main.py b/backend/app/main.py
+--- a/backend/app/main.py	2026-10-24 03:57:02.857526372 +0000
++++ b/backend/app/main.py	2026-10-24 03:57:02.909444189 +0000
+@@ -15,7 +15,7 @@
+ from app.core.schema import ensure_schema
+ from app.core.config import settings
+ from app.core.scheduler import scheduler, start_scheduler
+-from app.services import app_settings
++from app.services import app_settings, sos_watch
+ from app.services.notifier import notifier
+ from app.services.serial_ingest import serial_ingest
+ 
+@@ -56,9 +56,9 @@
+     """Callback asyncpg LISTEN - dipanggil tiap ada INSERT baru ke table
+     positions (lewat trigger pg_notify di init.sql). Forward langsung ke
+     semua client SSE, jadi backend nggak perlu polling DB tiap detik."""
+-    asyncio.create_task(
+-        notifier.broadcast(json.dumps({"type": "position", "data": json.loads(payload)}))
+-    )
++    data = json.loads(payload)
++    asyncio.create_task(notifier.broadcast(json.dumps({"type": "position", "data": data})))
++    asyncio.create_task(sos_watch.handle_position(data))  # tombol SOS pendaki -> alarm MANUAL_SOS (jalur apa pun)
+ 
+ 
+ @app.on_event("startup")
+diff -ruN -x __pycache__ -x node_modules -x dist -x .git -x '*.pyc' a/backend/app/services/serial_ingest.py b/backend/app/services/serial_ingest.py
+--- a/backend/app/services/serial_ingest.py	2026-10-24 03:57:02.857858946 +0000
++++ b/backend/app/services/serial_ingest.py	2026-10-24 03:57:02.909733820 +0000
+@@ -34,10 +34,8 @@
+     list_ports = None
+ 
+ DOWNLINK_POLL_S = 2.0
+-# Pendaki menahan flag SOS (tracker tidak tahu operator sudah menanganinya): jangan buat alarm baru tiap paket.
+-# Alarm MANUAL_SOS yang masih ACTIVE atau sudah ACKNOWLEDGED dalam jendela ini menahan alarm baru; lewat dari itu
+-# dan flag masih menyala = alarm diulang sebagai pengingat.
+-SOS_REALERT_S = 1800.0
++# Alarm MANUAL_SOS TIDAK dibuat di sini lagi: dibuat oleh app/services/sos_watch.py dari NOTIFY `position_updates`,
++# supaya jalur bridge (proses luar, Docker) dan jalur ingest bawaan memakai satu logika yang sama.
+ _CACHE_TTL_S = 10.0
+ 
+ 
+@@ -275,28 +273,6 @@
+             return
+         await self._store(rec)
+ 
+-    async def _raise_sos(self, conn, hiker_id: int, rec: bp.PositionRecord) -> None:
+-        """Flag SOS di paket -> alarm MANUAL_SOS (overlay + suara + SSE), sama jalurnya dengan alarm stagnan."""
+-        sid = await conn.fetchval(
+-            "SELECT id FROM hiking_sessions WHERE hiker_id = $1 AND status = 'active'", hiker_id
+-        )
+-        if sid is None:
+-            return
+-        recent = await conn.fetchval(
+-            """SELECT 1 FROM alerts WHERE session_id = $1 AND alert_type = 'MANUAL_SOS'
+-               AND status IN ('ACTIVE', 'ACKNOWLEDGED') AND triggered_at > now() - make_interval(secs => $2)""",
+-            sid, SOS_REALERT_S,
+-        )
+-        if recent:
+-            return
+-        alert = await alert_repo.create_alert(
+-            conn, hiker_id, sid, "MANUAL_SOS",
+-            meta={"sequence": rec.sequence, "lat": rec.lat, "lon": rec.lon,
+-                  "rssi_dbm": rec.rssi_dbm, "battery_pct": rec.battery_pct},
+-        )
+-        await notifier.broadcast(json.dumps({"type": "alert", "data": alert}, default=str))
+-        log.warning("SOS dari %s (paket #%s)", rec.hiker_code, rec.sequence)
+-
+     async def _handle_timing(self, raw: str) -> None:
+         """CSV_TIMING tiba SESUDAH CSV_DATA paket yang sama (urutan serial terjaga) -> isi rtt_ms barisnya.
+         Dibatasi 2 menit terakhir + rtt_ms IS NULL: sequence bisa dipakai ulang setelah pendaki restart."""
+@@ -339,22 +315,17 @@
+                 """
+                 INSERT INTO positions
+                     (hiker_id, location, elevation, hop_count, route_path, sequence, rssi_dbm, satellites, hdop,
+-                     missing_since_previous, total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, speed_kph, battery_pct)
++                     missing_since_previous, total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, speed_kph, battery_pct, sos)
+                 VALUES
+                     ($1, CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL
+                               ELSE point($2::float8, $3::float8) END,
+-                     $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
++                     $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                 """,
+                 hiker_id, rec.lon, rec.lat, rec.elevation, rec.hop_count, rec.route_path, rec.sequence,
+                 rec.rssi_dbm, rec.satellites, rec.hdop, rec.missing_since_previous, rec.total_missing,
+                 rec.recorded_at, rec.gps_valid, rec.gps_flags, rec.time_from_gps, rec.speed_kph,
+-                rec.battery_pct,
++                rec.battery_pct, rec.sos,
+             )
+-            if rec.sos:  # data posisi SUDAH tersimpan di atas; kegagalan alarm tidak boleh menghilangkannya
+-                try:
+-                    await self._raise_sos(conn, hiker_id, rec)
+-                except Exception:  # noqa: BLE001
+-                    log.exception("Gagal membuat alarm SOS untuk %s #%s", rec.hiker_code, rec.sequence)
+         self._packets += 1
+         self._last_packet_at = datetime.now(timezone.utc)
+ 
+diff -ruN -x __pycache__ -x node_modules -x dist -x .git -x '*.pyc' a/backend/app/services/sos_watch.py b/backend/app/services/sos_watch.py
+--- a/backend/app/services/sos_watch.py	1970-01-01 00:00:00.000000000 +0000
++++ b/backend/app/services/sos_watch.py	2026-10-24 03:57:02.909945270 +0000
+@@ -0,0 +1,62 @@
++"""Alarm MANUAL_SOS dari tombol SOS pendaki (satu logika untuk jalur bridge DAN ingest bawaan).
++
++Dipicu dari NOTIFY `position_updates` (main.py), yang menyala untuk SETIAP baris positions yang masuk,
++dari proses mana pun. Aturan:
++- Sudah ada alarm MANUAL_SOS berstatus ACTIVE untuk sesi itu -> tidak membuat alarm baru.
++- Tombol BARU ditekan (flag sos berubah 0 -> 1, atau backend baru start) -> alarm baru, walau alarm sebelumnya
++  sudah "Sudah ditangani". Menekan SOS lagi adalah sinyal darurat baru.
++- Flag sos MASIH menyala terus (tombol tidak dilepas) -> tidak ada alarm baru, kecuali alarm terakhir sudah lebih
++  tua dari SOS_REALERT_S (pengingat), supaya operator tidak dibanjiri tiap paket.
++"""
++from __future__ import annotations
++
++import asyncio
++import json
++import logging
++
++from app.core import database
++from app.repositories import alert_repo
++from app.services.notifier import notifier
++
++log = logging.getLogger("silacak.sos")
++
++SOS_REALERT_S = 1800.0
++_held: dict[str, bool] = {}  # kode alat -> flag SOS sudah terlihat menyala (belum pernah terlihat 0 sejak itu)
++_lock = asyncio.Lock()
++
++
++async def handle_position(data: dict) -> None:
++    code = data.get("hiker_code")
++    if not code:
++        return
++    if not data.get("sos"):
++        _held.pop(code, None)
++        return
++    async with _lock:
++        session_id = data.get("session_id")
++        if database.pool is None or session_id is None:
++            return
++        new_press = not _held.get(code)
++        async with database.pool.acquire() as conn:
++            if await alert_repo.get_active_alert(conn, session_id, "MANUAL_SOS"):
++                _held[code] = True
++                return
++            if not new_press:
++                recent = await conn.fetchval(
++                    """SELECT 1 FROM alerts WHERE session_id = $1 AND alert_type = 'MANUAL_SOS'
++                       AND triggered_at > now() - make_interval(secs => $2)""",
++                    session_id, SOS_REALERT_S,
++                )
++                if recent:
++                    return
++            hiker_id = await conn.fetchval("SELECT id FROM hikers WHERE hiker_code = $1", code)
++            if hiker_id is None:
++                return
++            alert = await alert_repo.create_alert(
++                conn, hiker_id, session_id, "MANUAL_SOS",
++                meta={"lat": data.get("lat"), "lon": data.get("lon"), "rssi_dbm": data.get("rssi_dbm"),
++                      "battery_pct": data.get("battery_pct"), "route_path": data.get("route_path")},
++            )
++            await notifier.broadcast(json.dumps({"type": "alert", "data": alert}, default=str))
++            log.warning("SOS dari %s (sesi %s)", code, session_id)
++        _held[code] = True
+diff -ruN -x __pycache__ -x node_modules -x dist -x .git -x '*.pyc' a/backend/tests/test_sos_watch.py b/backend/tests/test_sos_watch.py
+--- a/backend/tests/test_sos_watch.py	1970-01-01 00:00:00.000000000 +0000
++++ b/backend/tests/test_sos_watch.py	2026-10-24 03:57:02.910325813 +0000
+@@ -0,0 +1,130 @@
++"""Tes aturan alarm SOS (sos_watch.py) dengan pool/koneksi/alert_repo PALSU (tanpa Postgres).
++Yang TIDAK teruji di sini: SQL sungguhan dan NOTIFY (diuji terpisah di Postgres)."""
++import asyncio
++import sys
++import types
++import unittest
++
++try:
++    import asyncpg  # noqa: F401
++except ImportError:
++    sys.modules["asyncpg"] = types.SimpleNamespace(Pool=object, Connection=object, create_pool=None, connect=None)
++
++from app.core import database  # noqa: E402
++from app.services import sos_watch as sw  # noqa: E402
++
++
++class FakeConn:
++    def __init__(self, st):
++        self.st = st
++
++    async def fetchval(self, sql, *args):
++        if "FROM hikers" in sql:
++            return 7
++        if "FROM alerts" in sql:  # cek "alarm terakhir dalam jendela pengingat"
++            return 1 if self.st["recent"] else None
++        return None
++
++
++class FakePool:
++    def __init__(self, st):
++        self.st = st
++
++    def acquire(self):
++        st = self.st
++
++        class Ctx:
++            async def __aenter__(self_inner):
++                return FakeConn(st)
++
++            async def __aexit__(self_inner, *a):
++                return False
++
++        return Ctx()
++
++
++def pos(code="H01", sos=True, session_id=1):
++    return {"hiker_code": code, "sos": sos, "session_id": session_id, "lat": -7.58, "lon": 110.45,
++            "rssi_dbm": -97, "battery_pct": 40, "route_path": "LANGSUNG"}
++
++
++class SosWatch(unittest.TestCase):
++    def setUp(self):
++        self.st = {"active": False, "recent": False, "created": 0, "broadcast": 0}
++        self._saved = (database.pool, sw.alert_repo.get_active_alert, sw.alert_repo.create_alert, sw.notifier.broadcast)
++        database.pool = FakePool(self.st)
++        st = self.st
++
++        async def get_active(conn, session_id, alert_type):
++            return {"id": 1} if st["active"] else None
++
++        async def create(conn, hiker_id, session_id, alert_type, meta=None):
++            st["created"] += 1
++            st["active"] = True
++            return {"id": st["created"], "alert_type": alert_type}
++
++        async def bcast(msg):
++            st["broadcast"] += 1
++
++        sw.alert_repo.get_active_alert, sw.alert_repo.create_alert, sw.notifier.broadcast = get_active, create, bcast
++        sw._held.clear()
++
++    def tearDown(self):
++        database.pool, sw.alert_repo.get_active_alert, sw.alert_repo.create_alert, sw.notifier.broadcast = self._saved
++
++    def run_(self, *items):
++        async def go():
++            for d in items:
++                await sw.handle_position(d)
++        asyncio.run(go())
++
++    def test_sos_pertama_membuat_satu_alarm_dan_disiarkan(self):
++        self.run_(pos())
++        self.assertEqual((self.st["created"], self.st["broadcast"]), (1, 1))
++
++    def test_sos_terus_menyala_tidak_membuat_alarm_ganda(self):
++        self.run_(pos(), pos(), pos())
++        self.assertEqual(self.st["created"], 1)
++
++    def test_sudah_ditangani_lalu_flag_masih_menyala_tidak_membuat_alarm_baru(self):
++        self.run_(pos())
++        self.st["active"] = False   # operator menekan "Sudah ditangani"
++        self.st["recent"] = True    # alarm terakhir masih di dalam jendela pengingat
++        self.run_(pos(), pos())
++        self.assertEqual(self.st["created"], 1)
++
++    def test_tombol_dilepas_lalu_ditekan_lagi_membuat_alarm_baru(self):
++        self.run_(pos())
++        self.st["active"] = False
++        self.st["recent"] = True
++        self.run_(pos(sos=False), pos())
++        self.assertEqual(self.st["created"], 2)
++
++    def test_pengingat_bila_flag_menyala_lebih_lama_dari_jendela(self):
++        self.run_(pos())
++        self.st["active"] = False
++        self.st["recent"] = False   # alarm terakhir sudah lewat SOS_REALERT_S
++        self.run_(pos())
++        self.assertEqual(self.st["created"], 2)
++
++    def test_sudah_ada_alarm_aktif_tidak_dobel_walau_tombol_baru_ditekan(self):
++        self.st["active"] = True
++        self.run_(pos())
++        self.assertEqual(self.st["created"], 0)
++
++    def test_tanpa_pool_atau_sesi_tidak_error(self):
++        database.pool = None
++        self.run_(pos())
++        database.pool = FakePool(self.st)
++        self.run_(pos(session_id=None))
++        self.assertEqual(self.st["created"], 0)
++
++    def test_alat_berbeda_tidak_saling_mengunci(self):
++        self.run_(pos("H01"))
++        self.st["active"] = False
++        self.run_(pos("H02"))
++        self.assertEqual(self.st["created"], 2)
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff -ruN -x __pycache__ -x node_modules -x dist -x .git -x '*.pyc' a/reference-for-hardware-team/serial_to_postgres_bridge.py b/reference-for-hardware-team/serial_to_postgres_bridge.py
+--- a/reference-for-hardware-team/serial_to_postgres_bridge.py	2026-10-24 03:57:02.872262059 +0000
++++ b/reference-for-hardware-team/serial_to_postgres_bridge.py	2026-10-24 03:57:02.922199270 +0000
+@@ -180,10 +180,10 @@
+     # Kriteria validitas dari plan C-251 (4.1.3): Nsat >= 4 dan HDOP <= 5
+     gps_valid = lat is not None and (sats is None or sats >= 4) and (hdop is None or hdop <= 5.0)
+     recorded_at, time_from_gps = parse_recorded_at(row)
+-    if row.get("sos", "").strip() == "1":
+-        # Bridge ini proses TERPISAH dari backend: ia tidak bisa menyalakan overlay/suara alarm di dashboard.
+-        print(f"[!!! SOS !!!] node {row['node_id']} paket #{row['sequence']} mengirim SOS, tetapi bridge ini TIDAK "
+-              "membuat alarm. Pakai ingest bawaan backend (SERIAL_PORT=auto/COMx) untuk SOS.", file=sys.stderr)
++    sos = row.get("sos", "").strip() == "1"
++    if sos:
++        # Alarm dibuat BACKEND (sos_watch.py) dari NOTIFY position_updates begitu baris ini masuk ke Postgres.
++        print(f"[SOS] node {row['node_id']} paket #{row['sequence']}: SOS aktif (alarm dibuat backend; cek dashboard)")
+     try:
+         battery = int(row["battery_pct"]) if row.get("battery_pct", "") not in ("", "-") else None
+     except ValueError:
+@@ -191,6 +191,9 @@
+     if battery is not None and not 0 <= battery <= 100:
+         battery = None
+     # bit AltitudeValid (0x08) tidak di-set -> firmware mencetak altitude_m = 0.00 (bukan 0 m sungguhan)
++    speed = to_float(row["speed_kph"])
++    if flags is not None and not (flags & 0x10):  # bit SpeedValid: tanpa ini firmware mencetak 0.00 palsu
++        speed = None
+     elevation = to_float(row["altitude_m"])
+     if flags is not None and not (flags & 0x08):
+         elevation = None
+@@ -210,11 +213,11 @@
+             INSERT INTO positions
+                 (hiker_id, location, elevation, hop_count, route_path,
+                  sequence, rssi_dbm, satellites, hdop, missing_since_previous,
+-                 total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, battery_pct)
++                 total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, battery_pct, sos, speed_kph)
+             VALUES
+                 ($1, CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL
+                           ELSE point($2::float8, $3::float8) END,
+-                 $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
++                 $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+             """,
+             hiker_id,
+             lon,
+@@ -233,6 +236,28 @@
+             row["gps_flags"] or None,
+             time_from_gps,
+             None if battery is None else float(battery),
++            sos,
++            speed,
++        )
++
++
++async def handle_timing(pool: asyncpg.Pool, raw: str) -> None:
++    """CSV_TIMING,<seq>,<node_id>,<nama>,<rtt_ms>,<satu_arah_ms> -> isi positions.rtt_ms (sama dengan serial_ingest.py)."""
++    parts = next(csv.reader([raw]))
++    if len(parts) < 6:
++        return
++    seq, node, rtt = int(parts[1]), int(parts[2]), int(parts[4])
++    if rtt < 0:
++        return
++    async with pool.acquire() as conn:
++        await conn.execute(
++            """
++            UPDATE positions p SET rtt_ms = $3
++            FROM hikers h
++            WHERE h.id = p.hiker_id AND h.hiker_code = $1 AND p.sequence = $2
++              AND p.rtt_ms IS NULL AND p.received_at > now() - interval '2 minutes'
++            """,
++            f"H{node:02d}", seq, rtt,
+         )
+ 
+ 
+@@ -350,6 +375,12 @@
+                     except Exception as exc:  # noqa: BLE001
+                         print(f"[GAGAL ack] {exc}", file=sys.stderr)
+                     continue
++                if raw.startswith("CSV_TIMING,"):
++                    try:
++                        await handle_timing(pool, raw)
++                    except Exception as exc:  # noqa: BLE001
++                        print(f"[GAGAL timing] {exc}", file=sys.stderr)
++                    continue
+                 if not raw.startswith("CSV_DATA,"):
+                     continue
+ 
+diff -ruN -x __pycache__ -x node_modules -x dist -x .git -x '*.pyc' a/reference-for-hardware-team/sim_battery_sos.py b/reference-for-hardware-team/sim_battery_sos.py
+--- a/reference-for-hardware-team/sim_battery_sos.py	1970-01-01 00:00:00.000000000 +0000
++++ b/reference-for-hardware-team/sim_battery_sos.py	2026-10-24 03:57:02.922177870 +0000
+@@ -0,0 +1,88 @@
++#!/usr/bin/env python3
++"""Simulator baterai & SOS TANPA hardware: menyuntik baris CSV_DATA (format persis firmware base_real, 20 field)
++melalui kode bridge yang SAMA (parse_data + write_to_postgres) ke Postgres Docker.
++Backend (Docker) lalu bereaksi seperti pada alat asli: NOTIFY -> SSE -> dashboard, dan alarm MANUAL_SOS.
++
++Pakai:
++  python reference-for-hardware-team/sim_battery_sos.py --scenario baterai
++  python reference-for-hardware-team/sim_battery_sos.py --scenario sos
++  python reference-for-hardware-team/sim_battery_sos.py --scenario semua --node 9 --interval 1
++
++Perlu: pip install asyncpg   (sama dengan bridge). Docker harus jalan (port 5432 terbuka ke host).
++Skenario memakai Node ID bebas (--node, bawaan 9 -> pendaki H09) supaya tidak mengotori pendaki nyata.
++"""
++from __future__ import annotations
++
++import argparse
++import asyncio
++import csv
++import importlib.util
++import sys
++from pathlib import Path
++
++HERE = Path(__file__).parent
++spec = importlib.util.spec_from_file_location("bridge", HERE / "serial_to_postgres_bridge.py")
++bridge = importlib.util.module_from_spec(spec)
++spec.loader.exec_module(bridge)
++
++LAT0, LON0 = -7.5780, 110.4530  # sekitar titik awal peta dashboard
++
++
++def line(seq: int, node: int, battery: str, sos: int, step: int) -> str:
++    lat = LAT0 + step * 0.00012
++    lon = LON0 + step * 0.00009
++    label = f"Pendaki {chr(ord('A') + node - 1)}" if 1 <= node <= 26 else f"Node {node}"
++    return (
++        f"CSV_DATA,{seq},{node},{label},LANGSUNG,0,{seq * 5000},{seq * 5000 + 120},31,"
++        f"2026-10-24T08:00:{seq % 60:02d}Z,{lat:.7f},{lon:.7f},{1200 + step:.2f},1.20,9,0.95,-97,0,0,{battery},{sos}"
++    )
++
++
++def scenario_baterai(node: int) -> list[tuple[str, str]]:
++    out, seq = [], 1
++    for pct in (90, 70, 50, 30, 19, 12, 5):
++        out.append((f"baterai {pct}%" + ("  <-- di bawah 20%: peringatan baterai rendah" if pct < 20 else ""),
++                    line(seq, node, str(pct), 0, seq)))
++        seq += 1
++    out.append(("baterai TIDAK DIKETAHUI ('-')", line(seq, node, "-", 0, seq)))
++    return out
++
++
++def scenario_sos(node: int, start_seq: int = 100) -> list[tuple[str, str]]:
++    plan = [("normal", 0), ("normal", 0), ("SOS DITEKAN (alarm merah + bunyi harus muncul)", 1),
++            ("SOS masih ditahan (TIDAK boleh ada alarm baru)", 1), ("SOS masih ditahan", 1),
++            ("SOS dibatalkan di alat", 0), ("SOS ditekan LAGI (alarm baru harus muncul)", 1), ("SOS dibatalkan", 0)]
++    return [(label, line(start_seq + i, node, str(60 - i), sos, i)) for i, (label, sos) in enumerate(plan)]
++
++
++async def main() -> int:
++    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
++    ap.add_argument("--scenario", choices=["baterai", "sos", "semua"], default="semua")
++    ap.add_argument("--node", type=int, default=9, help="Node ID pendaki simulasi (bawaan 9 -> H09)")
++    ap.add_argument("--interval", type=float, default=2.0, help="jeda antar paket (detik)")
++    ap.add_argument("--database-url", default="postgresql://silacak:silacak@localhost:5432/silacak")
++    args = ap.parse_args()
++
++    steps: list[tuple[str, str]] = []
++    if args.scenario in ("baterai", "semua"):
++        steps += scenario_baterai(args.node)
++    if args.scenario in ("sos", "semua"):
++        steps += scenario_sos(args.node)
++
++    pool = await bridge.asyncpg.create_pool(args.database_url, min_size=1, max_size=2)
++    print(f"Menyuntik {len(steps)} paket untuk node {args.node} (H{args.node:02d}), jeda {args.interval}s. Buka dashboard sekarang.\n")
++    try:
++        for i, (label, raw) in enumerate(steps, 1):
++            row = bridge.parse_data(next(csv.reader([raw])))
++            await bridge.write_to_postgres(pool, row)
++            print(f"[{i:02d}/{len(steps)}] {label}\n        {raw}")
++            await asyncio.sleep(args.interval)
++    finally:
++        await pool.close()
++    print("\nSelesai. Hapus data simulasi bila perlu:\n"
++          f"  docker compose exec db psql -U silacak -d silacak -c \"DELETE FROM alerts WHERE session_id IN (SELECT s.id FROM hiking_sessions s JOIN hikers h ON h.id=s.hiker_id WHERE h.hiker_code='H{args.node:02d}'); DELETE FROM positions WHERE hiker_id=(SELECT id FROM hikers WHERE hiker_code='H{args.node:02d}'); DELETE FROM hiking_sessions WHERE hiker_id=(SELECT id FROM hikers WHERE hiker_code='H{args.node:02d}');\"")
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(asyncio.run(main()))

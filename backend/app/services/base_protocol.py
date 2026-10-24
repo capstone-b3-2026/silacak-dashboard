@@ -17,6 +17,15 @@ FIELDNAMES = [
 
 # USB-UART yang lazim di board ESP32: Silicon Labs CP210x, WCH CH340/CH341, FTDI, Espressif USB native
 LOCATION_VALID = 0x01  # GpsFlags::LocationValid di protocol.h firmware
+ALTITUDE_VALID = 0x08  # GpsFlags::AltitudeValid -- tanpa bit ini firmware mencetak altitude_m = 0.00 (BUKAN 0 m sungguhan)
+SPEED_VALID = 0x10     # GpsFlags::SpeedValid   -- tanpa bit ini firmware mencetak speed_kph = 0.00
+
+# Field OPSIONAL di BELAKANG baris CSV_DATA (firmware baru): field ke-19 = baterai 0..100 (%), ke-20 = flag SOS (1 = aktif).
+# Firmware lama hanya 18 field -> kedua kunci ini tidak ada di dict, dan to_record() memperlakukannya sebagai kosong.
+OPTIONAL_FIELDNAMES = ["battery_pct", "sos"]
+
+# Baris `CSV_TIMING,<seq>,<node_id>,<node_name>,<rtt_ms>,<one_way_ms>` dari handleTimingPacket() base_real.cpp
+TIMING_FIELDNAMES = ["sequence", "node_id", "node_name", "rtt_ms", "one_way_ms"]
 
 ESP_USB_VIDS = {0x10C4, 0x1A86, 0x0403, 0x303A}
 
@@ -32,7 +41,26 @@ def parse_csv_data(raw: str) -> dict[str, str] | None:
         return None
     if len(parts) < 19:
         return None
-    return dict(zip(FIELDNAMES, parts[1:19]))
+    row = dict(zip(FIELDNAMES, parts[1:19]))
+    row.update(zip(OPTIONAL_FIELDNAMES, parts[19:21]))
+    return row
+
+
+def parse_csv_timing(raw: str) -> dict[str, int] | None:
+    """`CSV_TIMING,...` -> {sequence, node_id, rtt_ms}, atau None kalau bukan CSV_TIMING / rusak."""
+    if not raw.startswith("CSV_TIMING,"):
+        return None
+    try:
+        parts = next(csv.reader([raw]))
+    except (csv.Error, StopIteration):
+        return None
+    if len(parts) < 6:
+        return None
+    d = dict(zip(TIMING_FIELDNAMES, parts[1:6]))
+    seq, node, rtt = to_int(d["sequence"]), to_int(d["node_id"]), to_int(d["rtt_ms"])
+    if seq is None or node is None or rtt is None or rtt < 0:
+        return None
+    return {"sequence": seq, "node_id": node, "rtt_ms": rtt}
 
 
 def to_int(v: str) -> int | None:
@@ -84,7 +112,28 @@ class PositionRecord:
     gps_valid: bool
     gps_flags: str | None
     time_from_gps: bool
+    speed_kph: float | None = None
+    battery_pct: float | None = None
+    sos: bool = False
 
+def parse_battery(value: str) -> float | None:
+    v = (value or "").strip().rstrip("%").strip()
+    if v in ("", "-"):
+        return None
+    try:
+        x = round(float(v))
+    except ValueError:
+        return None
+    return float(x) if 0 <= x <= 100 else None
+
+def parse_sos(value: str) -> bool:
+    v = (value or "").strip().lower()
+    if v in ("1", "true", "yes", "on", "sos"):
+        return True
+    try:
+        return float(v) > 0
+    except ValueError:
+        return False
 
 def to_record(row: dict[str, str], now: datetime | None = None) -> PositionRecord | None:
     node_id = to_int(row["node_id"])
@@ -101,17 +150,28 @@ def to_record(row: dict[str, str], now: datetime | None = None) -> PositionRecor
     if lat is None or lon is None:
         lat = lon = None  # paket tanpa fix TETAP disimpan (PDR, status GPS invalid, lokasi terakhir)
     sats, hdop = to_int(row["satellites"]), to_float(row["hdop"])
+    # Firmware mencetak 0.00 untuk altitude/speed yang TIDAK valid. Tanpa cek bit flag-nya, "0 m" tersimpan
+    # dan tampil di dashboard + <ele>0</ele> di GPX. flags kosong/rusak (None) = data lama: nilai dipakai apa adanya.
+    elevation, speed = to_float(row["altitude_m"]), to_float(row["speed_kph"])
+    if flags is not None and not (flags & ALTITUDE_VALID):
+        elevation = None
+    if flags is not None and not (flags & SPEED_VALID):
+        speed = None
+    # Baterai: hanya 0..100 yang dipercaya (firmware boleh mengirim 255/-1/"-" = tidak terbaca -> NULL, bukan 255%).
+    battery = parse_battery(row.get("battery_pct", ""))
+    sos = parse_sos(row.get("sos", ""))
     # kriteria validitas C-251 4.1.3: Nsat >= 4 dan HDOP <= 5
     gps_valid = lat is not None and (sats is None or sats >= 4) and (hdop is None or hdop <= 5.0)
     recorded_at, from_gps = parse_recorded_at(row, now)
     return PositionRecord(
         node_id=node_id, hiker_code=f"H{node_id:02d}", lat=lat, lon=lon,
-        elevation=to_float(row["altitude_m"]), hop_count=to_int(row["relay_hops"]),
+        elevation=elevation, hop_count=to_int(row["relay_hops"]),
         route_path=row["route"] or None, sequence=to_int(row["sequence"]),
         rssi_dbm=to_int(row["rssi_dbm"]), satellites=sats, hdop=hdop,
         missing_since_previous=to_int(row["missing_since_previous"]),
         total_missing=to_int(row["total_missing"]), recorded_at=recorded_at,
-        gps_valid=gps_valid, gps_flags=row["gps_flags"] or None, time_from_gps=from_gps,
+        gps_valid=gps_valid, gps_flags=row["gps_flags"] or None, time_from_gps=from_gps, speed_kph=speed,
+        battery_pct=None if battery is None else float(battery), sos=sos,
     )
 
 

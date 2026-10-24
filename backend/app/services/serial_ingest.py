@@ -20,7 +20,9 @@ from datetime import datetime, timezone
 
 from app.core import database
 from app.core.config import settings
+from app.repositories import alert_repo
 from app.services import base_protocol as bp
+from app.services.notifier import notifier
 
 log = logging.getLogger("silacak.serial")
 
@@ -32,6 +34,8 @@ except ImportError:  # pragma: no cover
     list_ports = None
 
 DOWNLINK_POLL_S = 2.0
+# Alarm MANUAL_SOS TIDAK dibuat di sini lagi: dibuat oleh app/services/sos_watch.py dari NOTIFY `position_updates`,
+# supaya jalur bridge (proses luar, Docker) dan jalur ingest bawaan memakai satu logika yang sama.
 _CACHE_TTL_S = 10.0
 
 
@@ -232,6 +236,14 @@ class SerialIngest:
         if raw.startswith("CFG_ACK,"):
             self._submit(self._handle_ack(raw))
             return
+        if raw.startswith("CSV_TIMING,"):  # laporan RTT dari pendaki (base_real.cpp handleTimingPacket)
+            if settings.raw_log:
+                try:
+                    self._write_raw(raw)
+                except OSError as exc:
+                    log.warning("Gagal menulis log mentah: %s", exc)
+            self._submit(self._handle_timing(raw))
+            return
         if not raw.startswith("CSV_DATA,"):
             return
         if settings.raw_log:
@@ -261,6 +273,23 @@ class SerialIngest:
             return
         await self._store(rec)
 
+    async def _handle_timing(self, raw: str) -> None:
+        """CSV_TIMING tiba SESUDAH CSV_DATA paket yang sama (urutan serial terjaga) -> isi rtt_ms barisnya.
+        Dibatasi 2 menit terakhir + rtt_ms IS NULL: sequence bisa dipakai ulang setelah pendaki restart."""
+        t = bp.parse_csv_timing(raw)
+        if t is None or database.pool is None:
+            return
+        async with database.pool.acquire() as conn:
+            await conn.execute(
+                """
+                UPDATE positions p SET rtt_ms = $3
+                FROM hikers h
+                WHERE h.id = p.hiker_id AND h.hiker_code = $1 AND p.sequence = $2
+                  AND p.rtt_ms IS NULL AND p.received_at > now() - interval '2 minutes'
+                """,
+                f"H{t['node_id']:02d}", t["sequence"], t["rtt_ms"],
+            )
+
     async def _store(self, rec: bp.PositionRecord) -> None:
         pool = database.pool
         if pool is None:
@@ -286,15 +315,16 @@ class SerialIngest:
                 """
                 INSERT INTO positions
                     (hiker_id, location, elevation, hop_count, route_path, sequence, rssi_dbm, satellites, hdop,
-                     missing_since_previous, total_missing, recorded_at, gps_valid, gps_flags, time_from_gps)
+                     missing_since_previous, total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, speed_kph, battery_pct, sos)
                 VALUES
                     ($1, CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL
                               ELSE point($2::float8, $3::float8) END,
-                     $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                     $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
                 """,
                 hiker_id, rec.lon, rec.lat, rec.elevation, rec.hop_count, rec.route_path, rec.sequence,
                 rec.rssi_dbm, rec.satellites, rec.hdop, rec.missing_since_previous, rec.total_missing,
-                rec.recorded_at, rec.gps_valid, rec.gps_flags, rec.time_from_gps,
+                rec.recorded_at, rec.gps_valid, rec.gps_flags, rec.time_from_gps, rec.speed_kph,
+                rec.battery_pct, rec.sos,
             )
         self._packets += 1
         self._last_packet_at = datetime.now(timezone.utc)

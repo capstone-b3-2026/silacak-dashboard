@@ -214,6 +214,9 @@ ALTER TABLE positions ALTER COLUMN location DROP NOT NULL;
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS gps_valid BOOLEAN;        -- NULL = data lama (anggap valid kalau ada lokasi)
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS gps_flags TEXT;           -- mentah dari firmware, buat diselidiki
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS time_from_gps BOOLEAN NOT NULL DEFAULT FALSE;  -- recorded_at asli dari GPS? (syarat hitung latency)
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS speed_kph REAL;           -- speed_kph dari CSV_DATA (NULL = bit SpeedValid tidak di-set)
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS rtt_ms INTEGER;           -- RTT diukur pendaki, dari baris CSV_TIMING (NULL = laporan tidak sampai)
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS sos BOOLEAN NOT NULL DEFAULT FALSE;  -- tombol SOS pendaki aktif saat paket ini dikirim (field ke-20 CSV_DATA)
 
 -- sama dengan versi di init.sql + session_id (dipakai dashboard buat tahu kalau sesi berganti)
 CREATE OR REPLACE FUNCTION notify_position_insert() RETURNS trigger AS $$
@@ -236,6 +239,7 @@ BEGIN
             'satellites', NEW.satellites,
             'hdop', NEW.hdop,
             'gps_valid', NEW.gps_valid,
+            'sos', NEW.sos,
             'recorded_at', NEW.recorded_at,
             'received_at', NEW.received_at
         )::text
