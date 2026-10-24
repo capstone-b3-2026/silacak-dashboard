@@ -204,7 +204,7 @@ async def insert_position(
             (hiker_id, location, elevation, sequence, rssi_dbm, hop_count,
              route_path, satellites, hdop, recorded_at, received_at)
         VALUES
-            ($1, ST_SetSRID(ST_MakePoint($2, $3), 4326)::geography,
+            ($1, point($2::float8, $3::float8),
              $4, $5, $6, $7, $8, $9, $10, $11, $12)
         """,
         hiker_id,

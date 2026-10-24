@@ -1,10 +1,33 @@
 <template>
   <div class="app" :data-theme="theme">
+    <!-- Topbar: merek, (kontrol peta di tengah, dari MapView), tema, notifikasi, operator -->
+    <header class="topbar floating" role="banner">
+      <div class="brand">
+        <span class="brand-logo" aria-hidden="true">
+          <svg viewBox="0 0 48 44"><path d="M3 38 17 14l7 11 5-8 16 21z" /><path d="M17 14l-3.2 5.4M29 17l2.4 4" /><circle cx="36" cy="9" r="3.2" /></svg>
+        </span>
+        <div class="brand-t"><strong>SiLacak</strong><span>Pemantauan pendakian</span></div>
+      </div>
+      <div class="top-right">
+        <button class="tb-ic" type="button" @click="toggleTheme" title="Ganti tema terang/gelap" aria-label="Ganti tema terang atau gelap">
+          <svg v-if="theme === 'dark'" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
+          <svg v-else viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
+          <svg class="tb-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+        <span class="tb-ic static" role="img" :aria-label="alertStore.alerts.length ? `${alertStore.alerts.length} alarm SOS aktif` : 'Tidak ada alarm SOS'" :title="alertStore.alerts.length ? `${alertStore.alerts.length} alarm SOS aktif` : 'Tidak ada alarm SOS'">
+          <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
+          <i v-if="alertStore.alerts.length" class="tb-dot"></i>
+        </span>
+      </div>
+    </header>
+
     <SosOverlay />
     <MapView :theme="theme" @toggle-theme="toggleTheme" />
+    <BaseStatusBar />
     <WorkspacePanel />
     <MonitoringPanel />
-    <SetupPanel v-if="siteStore.showSetup" />
+    <!-- Setup lokasi / DEM / relay = pengaturan lanjutan (persiapan lokasi), tidak dibutuhkan operator harian -->
+    <SetupPanel v-if="siteStore.showSetup && uiStore.advanced" />
   </div>
 </template>
 
@@ -15,6 +38,10 @@ import MapView from "./components/MapView.vue";
 import MonitoringPanel from "./components/MonitoringPanel.vue";
 import SosOverlay from "./components/SosOverlay.vue";
 import SetupPanel from "./components/SetupPanel.vue";
+import BaseStatusBar from "./components/BaseStatusBar.vue";
+import { useBaseStore } from "./stores/base";
+import { useUiStore } from "./stores/ui";
+import { installAutoUnlock } from "./composables/useAlarmSound";
 import { useSiteStore } from "./stores/site";
 import { useHikerStore } from "./stores/hikers";
 import { useAlertStore } from "./stores/alerts";
@@ -32,22 +59,36 @@ const alertStore = useAlertStore();
 const siteStore = useSiteStore();
 const sessionStore = useSessionStore();
 const diagStore = useDiagnosticsStore();
+const baseStore = useBaseStore();
+const uiStore = useUiStore();
 let diagTimer = null;
 watch(() => hikerStore.selectedCode, (c) => diagStore.refresh(c));
-onUnmounted(() => clearInterval(diagTimer));
+onUnmounted(() => {
+  clearInterval(diagTimer);
+  baseStore.stop();
+});
 
 onMounted(() => {
   hikerStore.loadInitial();
   alertStore.loadInitial();
   siteStore.loadActive();
   sessionStore.loadActive();
+  baseStore.start();
+  installAutoUnlock();
   diagStore.refresh(hikerStore.selectedCode);
   diagTimer = setInterval(() => diagStore.refresh(hikerStore.selectedCode), 5000);
 });
 
+let lastSessionSync = 0;
 useLiveStream((message) => {
   if (message.type === "position") {
     hikerStore.applyPositionUpdate(message.data);
+    // Alat baru yang mulai mengirim data dibuatkan sesi OTOMATIS oleh database (tanpa event SSE).
+    // Muat ulang daftar sesi sekali (maks. tiap 5 dtk) supaya banner "Belum check-in" langsung muncul tanpa refresh.
+    if (!sessionStore.active.some((s) => s.hiker_code === message.data.hiker_code) && Date.now() - lastSessionSync > 5000) {
+      lastSessionSync = Date.now();
+      sessionStore.loadActive();
+    }
   } else if (message.type === "alert") {
     alertStore.addAlert(message.data);
   } else if (message.type === "session") {
@@ -61,242 +102,356 @@ useLiveStream((message) => {
 </script>
 
 <style>
+/* Font: Inter (isi) + Plus Jakarta Sans (judul). Bila tidak ada internet, otomatis
+   memakai font sistem (Segoe UI) sehingga tampilan tetap rapi. Untuk offline penuh,
+   pasang paket @fontsource/inter dan @fontsource/plus-jakarta-sans lalu import di main.js. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap");
+
 /* ══════════════════════════════════════
-   DESIGN TOKENS — sama persis kayak referensi (web_dashboard_node)
-   biar dua-duanya konsisten kalau nanti dibandingin lagi.
+   PALET WARNA SiLacak (Forest + Warm Cream + Golden Orange)
+   Satu-satunya sumber warna antarmuka. Komponen lain memakai variabel ini,
+   jadi cukup diubah di sini.
+   Catatan nama variabel (nama lama dipertahankan agar komponen lain tidak perlu diubah):
+   --blue     = hijau brand (isian tombol segmen peta, dll.)
+   --blue-fg  = hijau brand untuk teks/ikon/garis di atas permukaan
+   --btn      = tombol aksi utama (Golden Orange). Mau ganti warna tombol? Ubah
+                --btn, --btn-hover, --on-btn di bawah.
+   --marker   = penanda pendaki normal
 ══════════════════════════════════════ */
 :root {
-  --bg: #0d1117;
-  --panel: #161b22;
-  --panel-2: #1c2230;
-  --panel-3: #20293a;
-  --line: rgba(148, 168, 196, 0.09);
-  --line-2: rgba(148, 168, 196, 0.16);
-  --line-3: rgba(148, 168, 196, 0.26);
-  --text: #dde5f0;
-  --text-2: #a8b8cc;
-  --muted: #6a7d93;
-  --blue: #4d8fd6;
-  --blue-glow: rgba(77, 143, 214, 0.18);
-  --teal: #3dab7e;
-  --green: #5aaa5a;
-  --amber: #c8883a;
-  --red: #c45050;
-  --violet: #8068c8;
-  --radius: 18px;
+  /* DARK MODE */
+  --bg: #101f19;          /* Deep Evergreen: latar utama */
+  --panel: #172b22;       /* Forest Charcoal: sidebar / panel */
+  --panel-2: #20382c;     /* Moss Slate: kartu / input */
+  --panel-3: #172b22;     /* kotak dalam kartu */
+  --line: #345141;        /* Muted Forest: border */
+  --line-2: #345141;
+  --line-3: #456654;
+  --text: #f5f2e8;        /* Warm Ivory */
+  --text-2: #b8c6b9;      /* Sage Gray */
+  --muted: #a5ada5;       /* Stone Gray: menunggu / placeholder */
+  --blue: #2f7652;        /* Forest Green (isian) */
+  --blue-fg: #75b58a;     /* hijau terang untuk teks/ikon di tema gelap */
+  --blue-hover: #39845e;  /* Fresh Forest */
+  --blue-glow: rgba(117, 181, 138, 0.16);
+  --teal: #75b58a;
+  --green: #75b58a;       /* Soft Sage: aman / terhubung */
+  --green-bg: rgba(117, 181, 138, 0.16);
+  --on-green: #101f19;    /* teks di atas isian hijau aman */
+  --amber: #a5ada5;       /* Stone Gray: menunggu */
+  --accent: #f5a623;      /* Golden Orange: lokasi / jalur / relay */
+  --accent-glow: rgba(245, 166, 35, 0.16);
+  --btn: #f5a623;         /* tombol utama */
+  --btn-hover: #ffb63f;
+  --on-btn: #101f19;      /* teks di atas tombol */
+  --marker: #75b58a;      /* penanda pendaki normal */
+  --on-marker: #101f19;
+  --red: #d95b49;         /* Terracotta Red: bahaya / SOS / putus */
+  --red-bg: rgba(217, 91, 73, 0.13);
+  --red-bg-2: rgba(217, 91, 73, 0.2);
+  --red-line: rgba(217, 91, 73, 0.4);
+  --red-pulse: rgba(217, 91, 73, 0.32);
+  --radius: 14px;
   --rs: 12px;
-  --lw: 300px;
-  --rw: 348px;
-  --gap: 11px;
-  --font: "Segoe UI", Inter, system-ui, -apple-system, sans-serif;
+  --lw: 340px;
+  --rw: 380px;
+  --gap: 12px;
+  --edge: 12px;
+  --top: 76px;
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-head: "Plus Jakarta Sans", "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 [data-theme="light"] {
-  --bg: #eaeff6;
-  --panel: rgba(255, 255, 255, 0.94);
-  --panel-2: #ffffff;
-  --panel-3: #f4f7fc;
-  --line: rgba(50, 80, 120, 0.1);
-  --line-2: rgba(50, 80, 120, 0.18);
-  --line-3: rgba(50, 80, 120, 0.28);
-  --text: #18273a;
-  --text-2: #526070;
-  --muted: #7a8fa8;
-  --blue: #1c5fba;
-  --blue-glow: rgba(28, 95, 186, 0.12);
-  --teal: #0f7050;
-  --green: #267026;
-  --amber: #7a5010;
-  --red: #922020;
-  --violet: #4a339a;
+  /* LIGHT MODE */
+  --bg: #f9f6eb;          /* Warm Cream: latar utama */
+  --panel: #f9f6eb;       /* sidebar */
+  --panel-2: #fffefa;     /* Pure Warm White: kartu / panel */
+  --panel-3: #f9f6eb;     /* kotak dalam kartu */
+  --line: #e4dfd2;        /* Soft Stone: border */
+  --line-2: #e4dfd2;
+  --line-3: #cfc9b8;
+  --text: #18382b;        /* Deep Forest */
+  --text-2: #667568;      /* Muted Olive Gray */
+  --muted: #9a9688;       /* Muted Stone: menunggu / placeholder */
+  --blue: #214f38;        /* Forest Green */
+  --blue-fg: #214f38;
+  --blue-hover: #183d2c;  /* Deep Forest Green */
+  --blue-glow: rgba(33, 79, 56, 0.1);
+  --teal: #4f8065;
+  --green: #4f8065;       /* Sage Green: aman / terhubung */
+  --green-bg: rgba(79, 128, 101, 0.16);
+  --on-green: #fffefa;
+  --amber: #9a9688;       /* Muted Stone: menunggu */
+  --accent: #e99a26;      /* Golden Orange: lokasi / jalur / relay */
+  --accent-glow: rgba(233, 154, 38, 0.16);
+  --btn: #e99a26;         /* tombol utama */
+  --btn-hover: #d98a18;
+  --on-btn: #18382b;
+  --marker: #214f38;      /* penanda pendaki normal */
+  --on-marker: #fffefa;
+  --red: #c94f3d;         /* Terracotta Red: bahaya / SOS / putus */
+  --red-bg: rgba(201, 79, 61, 0.11);
+  --red-bg-2: rgba(201, 79, 61, 0.18);
+  --red-line: rgba(201, 79, 61, 0.4);
+  --red-pulse: rgba(201, 79, 61, 0.3);
+  --shadow-pop: 0 8px 24px rgba(24, 56, 43, 0.18);
+  --shadow-card: 0 1px 2px rgba(24, 56, 43, 0.08);
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(--text); font-family: var(--font); -webkit-font-smoothing: antialiased; }
-.app { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+/* PERBAIKAN LIGHT MODE: data-theme ada di .app, bukan di body. Tanpa baris color ini,
+   semua teks tanpa warna eksplisit mewarisi putih dari body (tema gelap) dan tidak terbaca. */
+.app { position: relative; width: 100vw; height: 100vh; overflow: hidden; color: var(--text); background: var(--bg); font-family: var(--font); }
+.app input, .app select, .app textarea, .app button { font-family: inherit; }
+.app input::placeholder { color: var(--muted); }
+.app select option { background: var(--panel-2); color: var(--text); }
 
-/* ── floating glass panels ── */
-.floating { position: absolute; z-index: 20; border: 1px solid var(--line-2); background: var(--panel); }
+/* panel diciutkan -> lebar kolomnya mengecil sehingga peta (dan bilah yang menempel padanya) ikut melebar */
+.app:has(.sidebar.left.collapsed) { --lw: 48px; }
+.app:has(.sidebar.right.collapsed) { --rw: 48px; }
 
-/* ── sidebars ── */
-.sidebar { top: var(--gap); bottom: var(--gap); border-radius: var(--radius); display: flex; flex-direction: column; overflow: hidden; transition: width 0.15s ease, height 0.15s ease; }
-.sidebar.left { left: var(--gap); width: var(--lw); }
-.sidebar.right { right: var(--gap); width: var(--rw); }
-.sidebar.collapsed { width: 40px !important; height: 40px !important; top: var(--gap); bottom: auto; border-radius: 13px; }
+/* ── panel kartu membulat dengan jarak antar-panel (seperti dashboard referensi) ── */
+.floating { position: absolute; z-index: 20; border: 1px solid var(--line); background: var(--panel); border-radius: var(--radius); }
+
+/* ── sidebar kiri & kanan ── */
+.sidebar { top: var(--top); bottom: var(--edge); display: flex; flex-direction: column; overflow: hidden; transition: width 0.15s ease; }
+.sidebar.left { left: var(--edge); width: var(--lw); }
+.sidebar.right { right: var(--edge); width: var(--rw); }
+.sidebar.collapsed { width: 48px !important; height: 48px !important; top: var(--top); bottom: auto; border: 1px solid var(--line); border-radius: var(--rs); }
+.sidebar.left.collapsed { left: var(--edge); }
+.sidebar.right.collapsed { right: var(--edge); }
 .sidebar.collapsed .ch { display: none !important; }
 
-.sh { height: 44px; min-height: 44px; flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 0 9px; border-bottom: 1px solid var(--line); }
-.sidebar.collapsed .sh { height: 100%; min-height: 100%; border: 0; padding: 0; justify-content: center; }
-.tbtn { width: 28px; height: 28px; border-radius: 9px; border: 1px solid var(--line-2); background: transparent; color: var(--muted); cursor: pointer; display: grid; place-items: center; flex-shrink: 0; transition: color 0.12s, background 0.12s; }
+.sh { height: 58px; min-height: 58px; flex: 0 0 auto; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+.sidebar.collapsed .sh { height: 100%; min-height: 100%; border: 0; padding: 0; justify-content: center; background: transparent; }
+.tbtn { width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--text-2); cursor: pointer; display: grid; place-items: center; flex-shrink: 0; }
 .tbtn:hover { color: var(--text); background: var(--panel-2); }
-.tbtn svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
-.slbl { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }
-.slbl strong { font-size: 9px; letter-spacing: 0.13em; text-transform: uppercase; font-weight: 700; }
-.slbl span { font-size: 8.5px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600; }
+.tbtn.on { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
+.tbtn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.slbl { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.slbl strong { font-family: var(--font-head); font-size: 17px; font-weight: 800; letter-spacing: -0.01em; color: var(--text); }
+.slbl span { font-size: 13px; color: var(--text-2); font-weight: 500; }
 
-.sb { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 7px; padding: 7px; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+.sb { min-height: 0; flex: 1; display: flex; flex-direction: column; gap: 0; padding: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; scrollbar-color: var(--line-3) transparent; }
 
-/* ── inner panels ── */
-.pnl { border: 1px solid var(--line); border-radius: var(--rs); background: var(--panel-2); flex-shrink: 0; }
+/* ── kartu ── */
+/* seksi datar: tanpa kotak/bayangan, dipisah garis tipis */
+.pnl { background: transparent; flex-shrink: 0; color: var(--text); }
+.pnl + .pnl { border-top: 1px solid var(--line); }
 .pnl-fill { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-.ph { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 10px 6px; border-bottom: 1px solid var(--line); }
-.ph .tl { font-size: 8.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
-.ph .sv { font-size: 9.5px; color: var(--text-2); font-weight: 600; }
-.pb { padding: 7px 9px 9px; }
+.ph { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 14px 16px 0; }
+.ph .tl { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.ph .tl > svg.ic { width: 16px; height: 16px; flex-shrink: 0; fill: none; stroke: var(--blue-fg); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+/* judul kartu: lebih besar, tebal, font judul */
+.ph .tl { font-family: var(--font-head); font-size: 15px; font-weight: 700; letter-spacing: -0.005em; color: var(--text); }
+.ph .sv { flex-shrink: 0; font-size: 12px; color: var(--text-2); font-weight: 600; background: var(--panel-3); border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; white-space: nowrap; }
+.pb { padding: 12px 16px 16px; }
 
-/* ── metrics ── */
-.mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-.mc { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 7px 9px; }
-.mc strong { display: block; font-size: 16px; font-weight: 700; letter-spacing: -0.025em; line-height: 1.05; }
-.mc span { display: block; margin-top: 2px; font-size: 8px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.09em; font-weight: 700; }
+/* ── angka ringkasan ── */
+.mgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.mc { display: flex; align-items: center; gap: 10px; border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 2px; min-width: 0; }
+.mgrid .mc:nth-child(-n+2) { border-top: 0; }
+.mc-ic { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0; background: var(--blue-glow); color: var(--blue-fg); }
+.mc-ic svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.mc-ic.sos { background: var(--red); color: #fff; font-size: 11px; font-weight: 800; letter-spacing: 0.02em; }
+.mc-ic.ok { background: var(--green-bg); color: var(--green); }
+.mc-t { min-width: 0; }
+.mc strong { display: block; font-family: var(--font-head); font-size: 24px; font-weight: 800; line-height: 1.1; color: var(--text); }
+.mc span.mc-l { display: block; margin-top: 2px; font-size: 12px; color: var(--text-2); font-weight: 600; }
 .mc.alert strong { color: var(--red); }
 .mc.good strong { color: var(--green); }
 
-/* ── sparkline placeholders ── */
-.sgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-.sc { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 6px 7px 5px; }
+/* ── placeholder grafik ── */
+.sgrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
+.sc { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 8px 2px; }
 .sc-h { display: flex; align-items: baseline; justify-content: space-between; gap: 4px; margin-bottom: 4px; }
-.sc-h strong { font-size: 8px; font-weight: 700; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
-.sc-h span { font-size: 10.5px; font-weight: 700; }
+.sc-h strong { font-size: 13px; font-weight: 700; color: var(--text-2); }
+.sc-h span { font-size: 14px; font-weight: 700; }
 .sc-w svg { width: 100%; height: 24px; display: block; }
 .sc-w line { stroke: var(--line-3); stroke-width: 2; stroke-dasharray: 3 3; }
+.ekg-c { border: 0; border-radius: 0; background: transparent; padding: 4px 0; }
+.ekg-h { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+.ekg-h strong { font-size: 13px; font-weight: 700; color: var(--text-2); }
+.ekg-h span { font-size: 14px; font-weight: 700; color: var(--text); }
+.ekg-w { height: 56px; border-radius: 6px; border: 1px dashed var(--line-3); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; text-align: center; padding: 0 10px; }
+.rf-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; margin-bottom: 10px; }
+.rf-c { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 8px 2px; }
+.rf-c strong { display: block; font-size: 13px; color: var(--text-2); margin-bottom: 3px; }
+.rf-c span { display: block; font-size: 14px; font-weight: 700; line-height: 1.3; }
+.lgnd { display: flex; gap: 8px 14px; flex-wrap: wrap; }
+.lg { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.lg.dim { opacity: 0.6; }
+.sw.circle { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.sw.line { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
 
-/* ── EKG / timeline placeholder ── */
-.ekg-c { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 7px 8px; }
-.ekg-h { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 5px; }
-.ekg-h strong { font-size: 8px; font-weight: 700; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
-.ekg-h span { font-size: 10.5px; font-weight: 700; color: var(--text); }
-.ekg-w { height: 56px; border-radius: 6px; background: rgba(0, 0, 0, 0.18); display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 9px; text-align: center; padding: 0 10px; }
+/* ── tab: yang aktif berwarna oranye penuh supaya jelas ── */
+.tabs { display: grid; grid-template-columns: repeat(var(--tabs, 4), 1fr); gap: 6px; }
+.tab { height: 38px; white-space: nowrap; padding: 0 4px; font-size: 13px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text-2); font-weight: 600; font-size: 14px; cursor: pointer; position: relative; font-family: inherit; }
+.tab.active { color: var(--on-btn); background: var(--btn); border-color: var(--btn); }
+.tab:hover:not(.active) { color: var(--text); background: var(--panel-3); }
+.tab-badge { position: absolute; top: -7px; right: -4px; background: var(--red); color: #fff; font-size: 12px; font-weight: 700; border-radius: 999px; padding: 0 5px; line-height: 18px; min-width: 18px; }
 
-/* ── rf params ── */
-.rf-row { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 7px; }
-.rf-c { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 6px 8px; }
-.rf-c strong { display: block; font-size: 8px; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 3px; }
-.rf-c span { display: block; font-size: 10.5px; font-weight: 700; line-height: 1.3; }
-.lgnd { display: flex; gap: 8px; flex-wrap: wrap; }
-.lg { display: flex; align-items: center; gap: 4px; font-size: 9px; color: var(--muted); }
-.lg.dim { opacity: 0.5; }
-.sw.circle { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
-.sw.line { width: 12px; height: 3px; border-radius: 1px; display: inline-block; }
-
-/* ── tabs ── */
-.tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
-.tab { height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--muted); font-weight: 700; font-size: 9px; cursor: pointer; letter-spacing: 0.05em; transition: all 0.12s; position: relative; }
-.tab.active { color: var(--text); background: var(--panel-2); border-color: var(--line-2); }
-.tab:hover:not(.active) { color: var(--text-2); }
-.tab-badge { position: absolute; top: -5px; right: 3px; background: var(--red); color: #fff; font-size: 8px; font-weight: 700; border-radius: 999px; padding: 0 4px; line-height: 13px; min-width: 13px; }
-
-/* ── selected card ── */
-.selc { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 8px 10px; min-height: 80px; }
+/* ── kartu pendaki terpilih ── */
+.selc { border: 0; border-radius: 0; background: transparent; padding: 0; min-height: 80px; color: var(--text); }
 .selr { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
-.selr strong { font-size: 11.5px; font-weight: 700; letter-spacing: 0.05em; }
-.selb { font-size: 9.5px; color: var(--text-2); line-height: 1.75; }
+.selr strong { font-size: 15px; font-weight: 700; }
+.selb { font-size: 14px; color: var(--text-2); line-height: 1.7; }
 .selb b { color: var(--text); font-weight: 600; margin-right: 3px; }
 .selb .placeholder { color: var(--muted); }
 .selb-row { display: flex; flex-wrap: wrap; gap: 0 12px; }
-
-/* ── selected-hiker: baterai & last-seen sebagai hero stat ── */
-.selc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 9px; }
+.selc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .selc-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.selc-id strong { font-size: 15px; font-weight: 700; letter-spacing: 0.03em; }
-.selc-trail { font-size: 8.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-.selc-side { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex-shrink: 0; }
+.selc-id strong { font-family: var(--font-head); font-size: 24px; font-weight: 800; color: var(--text); }
+.selc-trail { font-size: 13px; color: var(--text-2); }
+.selc-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
 .selc-batt { display: flex; flex-direction: column; align-items: flex-end; margin-top: 3px; }
-.selc-batt strong { font-size: 22px; font-weight: 800; line-height: 1; color: var(--text); }
+.selc-batt strong { font-family: var(--font-head); font-size: 26px; font-weight: 800; line-height: 1; color: var(--text); }
 .selc-batt.hi strong { color: var(--green); }
-.selc-batt.mid strong { color: var(--amber); }
+.selc-batt.mid strong { color: var(--text); }
 .selc-batt.lo strong { color: var(--red); }
-.selc-batt span { font-size: 7.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-top: 1px; }
-.selc-seen { font-size: 8.5px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
-
-.selc-grid { display: grid; gap: 5px; margin-top: 7px; }
-.selc-grid.primary { grid-template-columns: 1fr 1fr; }
-.selc-grid.secondary { grid-template-columns: repeat(3, 1fr); }
-.selc-cell { border: 1px solid var(--line); border-radius: 9px; background: var(--panel); padding: 6px 8px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.selc-cell strong { font-size: 12.5px; font-weight: 700; line-height: 1.25; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.selc-cell.sm strong { font-size: 10.5px; }
+.selc-batt span { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+.selc-seen { font-size: 13px; color: var(--text-2); margin-top: 4px; white-space: nowrap; }
+.selc-grid { display: grid; gap: 0 16px; margin-top: 10px; }
+.selc-grid.primary { grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); }
+.selc-grid.secondary { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.selc-cell { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 8px 2px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.selc-cell strong { font-size: 14px; font-weight: 700; line-height: 1.25; color: var(--text); white-space: normal; overflow-wrap: break-word; }
+.selc-cell.sm strong { font-size: 13px; overflow-wrap: break-word; }
 .selc-cell strong.placeholder { color: var(--muted); font-weight: 600; }
-.selc-cell span { font-size: 7.5px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.selc-cell span { font-size: 13px; color: var(--text-2); }
 
-/* ── hiker grid ── */
-.hgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 5px; }
-.hcard { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 7px 8px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; transition: border-color 0.12s, background 0.12s; }
-.hcard:hover { border-color: var(--line-2); }
-.hcard.sel { background: var(--blue-glow); border-color: rgba(77, 143, 214, 0.3); }
-.hcard.sos { background: rgba(196, 80, 80, 0.1); border-color: rgba(196, 80, 80, 0.28); }
-.hcard.sel.sos { background: rgba(196, 80, 80, 0.14); border-color: rgba(196, 80, 80, 0.35); }
-.ht { display: flex; align-items: center; justify-content: space-between; gap: 5px; }
-.hid { font-size: 10.5px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.hpos { font-size: 8px; color: var(--muted); opacity: 0.8; }
+/* ── daftar pendaki ── */
+.hgrid { display: flex; flex-direction: column; gap: 0; }
+.hcard { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 8px; cursor: pointer; display: grid; grid-template-columns: auto 1fr auto auto; grid-template-areas: "num id bdg chev" ". gpx gpx gpx"; align-items: center; gap: 4px 10px; color: var(--text); }
+.hcard:hover { background: var(--blue-glow); }
+.hgrid .hcard:first-child { border-top: 0; }
+.hcard.sel { background: var(--accent-glow); box-shadow: inset 3px 0 0 var(--accent); }
+.hcard.sos { background: var(--red-bg); box-shadow: inset 3px 0 0 var(--red); }
+.hcard.sel.sos { background: var(--red-bg-2); box-shadow: inset 3px 0 0 var(--red); }
+.ht { display: contents; }
+.hnum { grid-area: num; width: 26px; height: 26px; border-radius: 50%; background: var(--marker); color: var(--on-marker); font-size: 12px; font-weight: 700; display: grid; place-items: center; }
+.hcard.sos .hnum { background: var(--red); color: #fff; }
+.hid-wrap { grid-area: id; min-width: 0; display: flex; flex-direction: column; }
+.hid { font-family: var(--font-head); font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+.ht .bdg { grid-area: bdg; }
+.hchev { grid-area: chev; width: 14px; height: 14px; fill: none; stroke: var(--muted); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.hcard > .gpx-btn { grid-area: gpx; justify-self: start; }
+.hpos { font-size: 12px; color: var(--text-2); }
 
-/* ── badges ── */
-.bdg { font-size: 7.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; padding: 2px 5px; border-radius: 999px; border: 1px solid transparent; white-space: nowrap; }
-.bdg.ok { background: rgba(90, 170, 90, 0.12); color: var(--green); border-color: rgba(90, 170, 90, 0.18); }
-.bdg.bad { background: rgba(196, 80, 80, 0.12); color: var(--red); border-color: rgba(196, 80, 80, 0.2); }
+/* ── lencana status: hijau sage = aman, merah penuh = bahaya ── */
+.bdg { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 6px; border: 1px solid transparent; white-space: nowrap; }
+.bdg.ok { background: var(--green); color: var(--on-green); border-color: var(--green); }
+.bdg.bad { background: var(--red); color: #fff; border-color: var(--red); }
 
-/* ── link/event/sos lists ── */
-.evl, .sosl, .lnkl { display: flex; flex-direction: column; gap: 5px; }
-.ev, .sosev, .lnk { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 6px 8px; }
-.sosev { border-left: 2px solid var(--red); background: rgba(196, 80, 80, 0.07); }
-.etit { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 9.5px; font-weight: 700; margin-bottom: 2px; }
-.emeta { font-size: 8.5px; color: var(--muted); line-height: 1.55; }
-.empty { border: 1px dashed var(--line-2); border-radius: 9px; min-height: 56px; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 9px; text-align: center; padding: 10px; line-height: 1.5; }
-.ack-btn { background: var(--red); color: #fff; border: none; border-radius: 6px; padding: 4px 10px; font-size: 10px; cursor: pointer; margin-top: 6px; }
+/* ── daftar tautan / log / SOS ── */
+.evl, .sosl, .lnkl { display: flex; flex-direction: column; gap: 0; }
+.ev, .sosev, .lnk { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 4px; color: var(--text); }
+.evl > .ev:first-child, .lnkl > .lnk:first-child, .sosl > .sosev:first-child { border-top: 0; }
+.sosev { border-left: 3px solid var(--red); background: var(--red-bg); padding-left: 12px; }
+.etit { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 15px; font-weight: 700; margin-bottom: 3px; color: var(--text); }
+.emeta { font-size: 13px; color: var(--text-2); line-height: 1.6; }
+.empty { border: 1px dashed var(--line-3); border-radius: 8px; min-height: 64px; display: flex; align-items: center; justify-content: center; color: var(--text-2); font-size: 14px; text-align: center; padding: 12px; line-height: 1.5; }
+.ack-btn { background: var(--btn); color: var(--on-btn); border: none; border-radius: 8px; padding: 8px 14px; min-height: 40px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 8px; font-family: inherit; }
+.ack-btn:hover:not(:disabled) { background: var(--btn-hover); }
 
-/* ── map controls (top-center pill) ── */
-.map-ctl { position: absolute; top: var(--gap); left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 1px; background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px; padding: 3px; }
-.mbtnn { width: 32px; height: 32px; border-radius: 9px; border: none; background: transparent; color: var(--text-2); cursor: pointer; display: grid; place-items: center; transition: background 0.12s, color 0.12s; }
-.mbtnn:hover { background: var(--panel-2); color: var(--text); }
-.mbtnn svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.msep { width: 1px; height: 20px; background: var(--line-2); flex-shrink: 0; margin: 0 1px; }
-.mbtnn.fit-btn { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; width: auto; padding: 0 8px; }
+/* ── topbar ── */
+.topbar { top: var(--edge); left: var(--edge); right: var(--edge); height: 56px; z-index: 25; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; }
+.brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.brand-logo { width: 44px; height: 40px; display: grid; place-items: center; color: var(--text); }
+.brand-logo svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.brand-logo svg circle { stroke: var(--accent); }
+.brand-t { display: flex; flex-direction: column; line-height: 1.15; }
+.brand-t strong { font-family: var(--font-head); font-size: 18px; font-weight: 800; color: var(--text); }
+.brand-t span { font-size: 11.5px; color: var(--text-2); font-weight: 500; }
+.top-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+.tb-ic { position: relative; height: 36px; min-width: 36px; padding: 0 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel-2); color: var(--text-2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.tb-ic:hover { color: var(--text); background: var(--panel-3); }
+.tb-ic.static { cursor: default; }
+.tb-ic svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.tb-ic .tb-chev { width: 12px; height: 12px; }
+.tb-dot { position: absolute; top: 6px; right: 7px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); border: 1.5px solid var(--panel-2); }
 
-/* ── conn indicator ── */
-.conn-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--muted); margin-right: 4px; transition: background 0.3s; }
+/* ── kontrol peta: duduk di tengah topbar ── */
+.map-ctl { top: calc(var(--edge) + 8px); left: 0; right: 0; margin: 0 auto; width: fit-content; max-width: calc(100vw - 2 * var(--edge) - 640px); z-index: 30; display: flex; align-items: center; justify-content: center; flex-wrap: nowrap; gap: 2px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; padding: 2px; height: 40px; box-shadow: none; }
+.mbtnn { min-width: 34px; height: 34px; border-radius: 8px; border: none; background: transparent; color: var(--text-2); cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-family: inherit; white-space: nowrap; }
+.mbtnn:hover:not(:disabled) { background: var(--panel-3); color: var(--text); }
+.mbtnn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.msep { width: 1px; height: 20px; background: var(--line); flex-shrink: 0; margin: 0 2px; }
+.mbtnn.fit-btn { font-size: 13px; font-weight: 600; width: auto; padding: 0 12px; }
+.mbtnn .seg { color: var(--muted); }
+.mbtnn .seg.on { color: var(--text); font-weight: 700; }
+.mbtnn .seg-sl { color: var(--line-3); }
+.app .map-ctl .mbtnn.pri { background: var(--blue); color: #fff; }
+.app .map-ctl .mbtnn.pri:hover:not(:disabled) { background: var(--blue-hover); color: #fff; }
+.app .map-ctl .mbtnn.on3d { background: var(--blue-glow); color: var(--blue-fg) !important; box-shadow: inset 0 0 0 1px var(--blue-fg); }
+
+.conn-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
 .conn-dot.live { background: var(--green); }
 
-/* ── maplibre overrides ── */
+/* ── peta ── */
 .maplibregl-map { background: transparent; font-family: var(--font); }
-.maplibregl-ctrl-attrib { background: var(--panel) !important; color: var(--muted) !important; font-size: 9px; }
-.maplibregl-ctrl-attrib a { color: var(--text-2) !important; }
-.sl-popup .maplibregl-popup-content { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-2); font-family: var(--font); font-size: 11px; line-height: 1.55; box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3); padding: 10px 26px 10px 12px; border-radius: 10px; }
-.sl-popup .maplibregl-popup-close-button { color: var(--text-2); font-size: 16px; }
+.maplibregl-ctrl-attrib { background: var(--panel) !important; color: var(--text-2) !important; font-size: 12px; }
+.maplibregl-ctrl-attrib a { color: var(--text) !important; }
+.sl-popup .maplibregl-popup-content { background: var(--panel-2); color: var(--text); border: 1px solid var(--line-3); font-family: var(--font); font-size: 14px; line-height: 1.55; box-shadow: none; padding: 10px 28px 10px 12px; border-radius: 8px; }
+.sl-popup .maplibregl-popup-close-button { color: var(--text-2); font-size: 18px; }
 .sl-popup.maplibregl-popup-anchor-bottom .maplibregl-popup-tip { border-top-color: var(--panel-2); }
 .sl-popup.maplibregl-popup-anchor-top .maplibregl-popup-tip { border-bottom-color: var(--panel-2); }
 .mk-anchor { width: 34px; height: 34px; }
 
-.mk-site { min-width: 24px; height: 24px; padding: 0 4px; border-radius: 8px; display: grid; place-items: center; color: #fff; font-size: 9px; font-weight: 700; border: 2px solid rgba(255, 255, 255, 0.85); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35); cursor: default; user-select: none; }
-.mk-site.base { background: var(--green); }
-.mk-site.relay { background: var(--violet); }
-.mk-site.relay.broken { background: var(--red); }
-.mk-site.drag { cursor: grab; box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
+/* penanda: pendaki = hijau, SOS = merah, base = hijau sage, relay = oranye */
+.mk-site { min-width: 26px; height: 26px; padding: 0 5px; border-radius: 6px; display: grid; place-items: center; color: #fff; font-size: 13px; font-weight: 700; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); cursor: default; user-select: none; }
+.mk-site.base { background: var(--green); color: var(--on-green); }
+.mk-site.relay { background: var(--accent); color: var(--on-btn); }
+.mk-site.relay.broken { opacity: 0.6; outline: 2px dashed var(--text); outline-offset: 2px; } /* bukan merah: merah = SOS */
+.mk-site.drag { cursor: grab; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6); }
 .mk-site.drag:active { cursor: grabbing; }
-
-/* ── markers ── */
 .mk-wrap { position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-.mk-h { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--blue); color: #fff; font-size: 8.5px; font-weight: 700; border: 2px solid rgba(255, 255, 255, 0.85); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3); cursor: pointer; user-select: none; transition: width 0.15s ease, height 0.15s ease, font-size 0.15s ease; }
-.mk-h.sos { background: var(--red); border-color: rgba(255, 200, 200, 0.8); }
-.mk-h.selected { width: 28px; height: 28px; font-size: 10px; border-width: 3px; z-index: 10; }
+.mk-h { width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--marker); color: var(--on-marker); font-size: 12px; font-weight: 700; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); cursor: pointer; user-select: none; transition: width 0.15s ease, height 0.15s ease; }
+.mk-h.sos { background: var(--red); color: #fff; }
+.mk-h.selected { width: 32px; height: 32px; font-size: 13px; border-width: 3px; z-index: 10; }
+/* cincin penanda pendaki terpilih: diam (tanpa animasi/glow) */
+.mk-ring { position: absolute; width: 42px; height: 42px; border-radius: 50%; border: 2px solid var(--accent); pointer-events: none; }
+.mk-ring.sos { border-color: var(--red); }
 
-/* cincin "radar ping" buat marker yang lagi dipilih monitor - biar beda
-   jelas dari marker lain, gak cuma gede dikit doang */
-.mk-ring {
-  position: absolute; width: 24px; height: 24px; border-radius: 50%;
-  border: 2px solid var(--blue); box-shadow: 0 0 10px 2px var(--blue-glow);
-  animation: mk-pulse 1.5s ease-out infinite; pointer-events: none;
-}
-.mk-ring.sos { border-color: var(--red); box-shadow: 0 0 10px 2px rgba(196, 80, 80, 0.35); }
-@keyframes mk-pulse {
-  0% { transform: scale(0.9); opacity: 0.9; }
-  70% { transform: scale(2.2); opacity: 0; }
-  100% { opacity: 0; }
-}
-
-/* ── small screens: drop the floating overlay, stack everything ── */
-@media (max-width: 900px) {
+/* ── layar kecil: panel ditumpuk di bawah peta ── */
+@media (max-width: 1100px) {
   html, body { overflow: auto; }
   .app { height: auto; min-height: 100vh; }
   #map { position: relative !important; min-height: 52vh; }
-  .sidebar { position: relative; left: auto !important; right: auto !important; top: auto; bottom: auto; width: auto !important; height: auto !important; margin: 8px; border-radius: 16px; }
+  .topbar { position: relative; top: auto; left: auto; right: auto; margin: 8px; }
+  .sidebar { position: relative; left: auto !important; right: auto !important; top: auto; bottom: auto; width: auto !important; height: auto !important; margin: 8px; border: 1px solid var(--line); border-radius: var(--rs); }
   .sidebar.collapsed { width: auto !important; height: auto !important; }
-  .map-ctl { top: 56px; }
+  .map-ctl { top: 76px; max-width: 96vw; flex-wrap: wrap; height: auto; }
 }
+
+/* ── aksesibilitas ── */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:disabled { cursor: not-allowed; }
+@media (pointer: coarse) {
+  .tbtn { width: 42px; height: 42px; }
+  .mbtnn { min-width: 44px; height: 44px; }
+  .tab { height: 46px; }
+  .mini, .lnk-btn { min-height: 38px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+@media (max-width: 600px) {
+  .hgrid, .mgrid, .selc-grid.primary { grid-template-columns: 1fr; }
+  .selc-grid.secondary { grid-template-columns: 1fr 1fr; }
+}
+
+/* ── penyesuaian warna & tipografi untuk komponen yang gayanya ada di file masing-masing ──
+   (selektor sengaja lebih spesifik agar menang tanpa mengubah file komponen) */
+.app .sess-warn .lnk-btn { color: var(--text); font-weight: 600; }
+.app .sess-warn { color: var(--text); }
+.app .sess strong { color: var(--text); font-size: 14px; }
+.app .sess-form .sess-ft { font-family: var(--font-head); font-size: 15px; font-weight: 700; color: var(--text); }
+.app .dp .dp-t { font-family: var(--font-head); font-size: 14px; font-weight: 700; color: var(--text); }
+.app .setup .btn.active { background: var(--btn); border-color: var(--btn); color: var(--on-btn); }
+.app .setup .stabs button.on { color: var(--text); }
+.app .setup .nid { color: var(--text); }
+.app .setup { border-top: 0; border-bottom: 0; border-right: 0; }
 </style>

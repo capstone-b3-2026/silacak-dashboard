@@ -7,6 +7,7 @@ menulis ke alat, lalu melapor balik lewat POST /devices/commands/{id}/result.
 """
 import json
 
+import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
@@ -34,6 +35,7 @@ def _out(r, last_cmd=None) -> dict:
     return {
         "id": r["id"], "node_id": r["node_id"], "name": r["name"], "role": r["role"],
         "hiker_code": f"H{r['node_id']:02d}" if r["role"] == "tracker" else None,
+        "plan_slot": r["plan_slot"],
         "config": {**DEFAULT_CONFIG, **(_j(r["config"]) or {})},
         "config_version": r["config_version"], "pushed_version": r["pushed_version"],
         "in_sync": r["config_version"] == r["pushed_version"],
@@ -123,12 +125,33 @@ async def update_device(device_id: int, body: DeviceIn, conn=Depends(get_db)):
     if dup:
         raise HTTPException(409, f"node_id {body.node_id} sudah dipakai perangkat lain.")
     r = await conn.fetchrow(
-        """UPDATE devices SET node_id=$2, name=$3, role=$4, config=$5, config_version=config_version+1
+        """UPDATE devices SET node_id=$2, name=$3, role=$4, config=$5, config_version=config_version+1,
+                  plan_slot = CASE WHEN $4 = 'relay' THEN plan_slot ELSE NULL END
            WHERE id=$1 RETURNING id""",
         device_id, body.node_id, body.name.strip(), body.role, json.dumps(body.config),
     )
     if not r:
         raise HTTPException(404, "Perangkat tidak ditemukan.")
+    return await _list(conn)
+
+
+class PlanSlotIn(BaseModel):
+    plan_slot: int | None = Field(default=None, ge=1, le=64)
+
+
+@router.put("/{device_id}/plan-slot")
+async def set_plan_slot(device_id: int, body: PlanSlotIn, conn=Depends(get_db)):
+    """Petakan relay ke posisi R<n> pada rencana lokasi (null = lepas). Sengaja TIDAK lewat PUT /{id}: pemetaan ini
+    data dashboard, tidak boleh menaikkan config_version (yang berarti 'belum disinkronkan ke alat')."""
+    dev = await conn.fetchrow("SELECT id, role FROM devices WHERE id=$1", device_id)
+    if not dev:
+        raise HTTPException(404, "Perangkat tidak ditemukan.")
+    if body.plan_slot is not None and dev["role"] != "relay":
+        raise HTTPException(422, "Hanya perangkat berperan relay yang bisa dipetakan ke posisi relay.")
+    try:
+        await conn.execute("UPDATE devices SET plan_slot=$2 WHERE id=$1", device_id, body.plan_slot)
+    except asyncpg.UniqueViolationError:
+        raise HTTPException(409, f"Posisi R{body.plan_slot} sudah dipakai relay lain.") from None
     return await _list(conn)
 
 

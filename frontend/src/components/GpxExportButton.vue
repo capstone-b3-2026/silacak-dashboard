@@ -16,15 +16,19 @@ defineProps({
 <style scoped>
 .gpx-btn {
   display: inline-block;
-  background: #2f81f7;
-  color: white;
-  border-radius: 6px;
-  padding: 6px 10px;
+  background: transparent;
+  color: var(--blue-fg);
+  border: 1px solid var(--blue-fg);
+  border-radius: 8px;
+  padding: 3px 10px;
   font-size: 12px;
+  font-weight: 600;
   text-decoration: none;
-  font-family: system-ui, sans-serif;
+  font-family: inherit;
 }
 .gpx-btn:hover {
-  background: #1f6feb;
+  background: var(--btn);
+  border-color: var(--btn);
+  color: var(--on-btn);
 }
 </style>

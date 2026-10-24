@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
 """
+CATATAN: fungsi script ini sekarang SUDAH tertanam di backend (app/services/serial_ingest.py,
+dijalankan otomatis kalau SERIAL_PORT diatur). Script ini dipertahankan sebagai referensi/alat
+debug mandiri; JANGAN jalankan bersamaan dengan ingest bawaan pada port yang sama.
+
 REFERENSI - bukan bagian resmi dari dashboard SiLacak.
 
 Ini contoh cara nyambungin base station (via USB serial) ke database
@@ -93,11 +97,14 @@ def parse_data(parts: list[str]) -> dict[str, str] | None:
     global _warned_extra
     if len(parts) < 19:
         return None
-    if len(parts) > 19 and not _warned_extra:
+    if len(parts) > 21 and not _warned_extra:
         _warned_extra = True
-        print(f"[PERINGATAN] CSV_DATA punya {len(parts) - 1} field (>18): field tambahan diabaikan. "
+        print(f"[PERINGATAN] CSV_DATA punya {len(parts) - 1} field (>20): field di luar baterai/SOS diabaikan. "
               "Perbarui FIELDNAMES + INSERT kalau mau dipakai.", file=sys.stderr)
-    return dict(zip(FIELDNAMES, parts[1:19]))
+    row = dict(zip(FIELDNAMES, parts[1:19]))
+    row["battery_pct"] = parts[19] if len(parts) > 19 else ""  # field ke-19 (firmware baru)
+    row["sos"] = parts[20] if len(parts) > 20 else ""          # field ke-20 (firmware baru)
+    return row
 
 
 def select_port(requested: str | None) -> str:
@@ -164,11 +171,32 @@ async def write_to_postgres(pool: asyncpg.Pool, row: dict[str, str]) -> None:
     lon = to_float(row["longitude"])
     sats = to_int(row["satellites"])
     hdop = to_float(row["hdop"])
+    flags = to_int(row["gps_flags"])
+    # Firmware mencetak 0.0000000,0.0000000 (bukan kosong) saat tidak ada fix; bit LocationValid (1) tidak di-set.
+    if (flags is not None and not (flags & 1)) or (lat == 0.0 and lon == 0.0):
+        lat = lon = None
     if lat is None or lon is None:
         lat = lon = None  # paket tanpa fix TETAP disimpan (hitung PDR, status GPS invalid, lokasi terakhir)
     # Kriteria validitas dari plan C-251 (4.1.3): Nsat >= 4 dan HDOP <= 5
     gps_valid = lat is not None and (sats is None or sats >= 4) and (hdop is None or hdop <= 5.0)
     recorded_at, time_from_gps = parse_recorded_at(row)
+    sos = row.get("sos", "").strip() == "1"
+    if sos:
+        # Alarm dibuat BACKEND (sos_watch.py) dari NOTIFY position_updates begitu baris ini masuk ke Postgres.
+        print(f"[SOS] node {row['node_id']} paket #{row['sequence']}: SOS aktif (alarm dibuat backend; cek dashboard)")
+    try:
+        battery = int(row["battery_pct"]) if row.get("battery_pct", "") not in ("", "-") else None
+    except ValueError:
+        battery = None
+    if battery is not None and not 0 <= battery <= 100:
+        battery = None
+    # bit AltitudeValid (0x08) tidak di-set -> firmware mencetak altitude_m = 0.00 (bukan 0 m sungguhan)
+    speed = to_float(row["speed_kph"])
+    if flags is not None and not (flags & 0x10):  # bit SpeedValid: tanpa ini firmware mencetak 0.00 palsu
+        speed = None
+    elevation = to_float(row["altitude_m"])
+    if flags is not None and not (flags & 0x08):
+        elevation = None
 
     async with pool.acquire() as conn:
         # Node yang di Setup didaftarkan sebagai relay/base BUKAN pendaki: kalau firmware-nya suatu
@@ -185,16 +213,16 @@ async def write_to_postgres(pool: asyncpg.Pool, row: dict[str, str]) -> None:
             INSERT INTO positions
                 (hiker_id, location, elevation, hop_count, route_path,
                  sequence, rssi_dbm, satellites, hdop, missing_since_previous,
-                 total_missing, recorded_at, gps_valid, gps_flags, time_from_gps)
+                 total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, battery_pct, sos, speed_kph)
             VALUES
                 ($1, CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL
-                          ELSE ST_SetSRID(ST_MakePoint($2::float8, $3::float8), 4326)::geography END,
-                 $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+                          ELSE point($2::float8, $3::float8) END,
+                 $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
             """,
             hiker_id,
             lon,
             lat,
-            to_float(row["altitude_m"]),
+            elevation,
             to_int(row["relay_hops"]),
             row["route"] or None,
             to_int(row["sequence"]),
@@ -207,6 +235,29 @@ async def write_to_postgres(pool: asyncpg.Pool, row: dict[str, str]) -> None:
             gps_valid,
             row["gps_flags"] or None,
             time_from_gps,
+            None if battery is None else float(battery),
+            sos,
+            speed,
+        )
+
+
+async def handle_timing(pool: asyncpg.Pool, raw: str) -> None:
+    """CSV_TIMING,<seq>,<node_id>,<nama>,<rtt_ms>,<satu_arah_ms> -> isi positions.rtt_ms (sama dengan serial_ingest.py)."""
+    parts = next(csv.reader([raw]))
+    if len(parts) < 6:
+        return
+    seq, node, rtt = int(parts[1]), int(parts[2]), int(parts[4])
+    if rtt < 0:
+        return
+    async with pool.acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE positions p SET rtt_ms = $3
+            FROM hikers h
+            WHERE h.id = p.hiker_id AND h.hiker_code = $1 AND p.sequence = $2
+              AND p.rtt_ms IS NULL AND p.received_at > now() - interval '2 minutes'
+            """,
+            f"H{node:02d}", seq, rtt,
         )
 
 
@@ -298,7 +349,7 @@ async def main_async(args: argparse.Namespace) -> None:
         output_path = Path("data") / datetime.now().strftime("lora_log_%Y%m%d_%H%M%S.csv")
         output_path.parent.mkdir(parents=True, exist_ok=True)
         csv_file = output_path.open("a", newline="", encoding="utf-8")
-        csv_writer = csv.DictWriter(csv_file, fieldnames=FIELDNAMES)
+        csv_writer = csv.DictWriter(csv_file, fieldnames=FIELDNAMES, extrasaction="ignore")
         if csv_file.tell() == 0:
             csv_writer.writeheader()
         print(f"Dual-write CSV ke: {output_path.resolve()}")
@@ -323,6 +374,12 @@ async def main_async(args: argparse.Namespace) -> None:
                         await handle_ack(pool, raw)
                     except Exception as exc:  # noqa: BLE001
                         print(f"[GAGAL ack] {exc}", file=sys.stderr)
+                    continue
+                if raw.startswith("CSV_TIMING,"):
+                    try:
+                        await handle_timing(pool, raw)
+                    except Exception as exc:  # noqa: BLE001
+                        print(f"[GAGAL timing] {exc}", file=sys.stderr)
                     continue
                 if not raw.startswith("CSV_DATA,"):
                     continue
@@ -368,7 +425,15 @@ def main() -> int:
         help="Firmware belum membalas CFG_ACK: anggap konfigurasi 'acked' begitu baris CFG ditulis ke serial.",
     )
     args = parser.parse_args()
-    asyncio.run(main_async(args))
+    while True:
+        try:
+            asyncio.run(main_async(args))
+            break  
+        except KeyboardInterrupt:
+            break
+        except Exception as exc:  
+            print(f"[BRIDGE] berhenti: {exc!r}. Ulang dalam 3 detik (Ctrl+C untuk berhenti)...", file=sys.stderr)
+            time.sleep(3)
     return 0
 
 

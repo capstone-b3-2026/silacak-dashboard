@@ -11,6 +11,20 @@ class Settings(BaseSettings):
     stagnant_radius_m: float = 50.0
     stagnant_check_interval_minutes: int = 2
 
+    # Folder data (DEM/tile hasil Setup, log mentah serial). Sama dengan env DATA_DIR yang dibaca sites.py.
+    data_dir: str = "/app/data"
+
+    # Kalau diisi (folder hasil `npm run build`), backend sendiri yang menyajikan dashboard di "/"
+    # -> tidak butuh nginx/Node (dipakai mode portable). Kosong = backend API saja (Docker/dev).
+    frontend_dir: str | None = None
+
+    # Ingest serial base station yang tertanam di backend. "off" (bawaan, kompatibel dengan
+    # bridge eksternal) | "auto" (cari ESP32 sendiri) | "COM5" / "/dev/ttyUSB0".
+    serial_port: str = "off"
+    serial_baud: int = 115200
+    serial_no_ack: bool = False   # firmware belum membalas CFG_ACK; True = anggap 'acked' begitu ditulis
+    raw_log: bool = True          # simpan setiap baris CSV_DATA mentah (append-only) di data_dir/raw/
+
     cors_origins: list[str] = [
         "http://localhost:5173",
         "http://localhost:8080",

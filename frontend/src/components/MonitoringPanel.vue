@@ -1,20 +1,20 @@
 <template>
   <aside class="floating sidebar right" :class="{ collapsed }">
     <div class="sh">
-      <button class="tbtn" @click="collapsed = !collapsed" title="Collapse sidebar">
+      <button class="tbtn" @click="collapsed = !collapsed" :aria-expanded="!collapsed" title="Ciutkan atau buka panel" aria-label="Ciutkan atau buka panel kanan">
         <svg viewBox="0 0 24 24"><path d="M10 5l7 7-7 7" /></svg>
       </button>
       <div class="slbl ch">
-        <strong>monitoring</strong>
-        <span>hiker, lora, sos</span>
+        <strong>Pemantauan</strong>
+        <span>Pendaki, sinyal, SOS</span>
       </div>
     </div>
 
     <div class="sb ch">
-      <div style="display: flex; flex-direction: column; gap: 7px; min-height: 0; flex: 1">
+      <div style="display: flex; flex-direction: column; gap: 0; min-height: 0; flex: 1">
         <!-- selected hiker -->
         <div class="pnl">
-          <div class="ph"><div class="tl">selected hiker</div><div class="sv">{{ hikerStore.selectedCode || "none" }}</div></div>
+          <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>Pendaki dipilih</div><div class="sv">{{ hikerStore.selectedCode || "belum ada" }}</div></div>
           <div class="pb">
             <div class="selc" v-if="selected">
               <div class="selc-top">
@@ -23,12 +23,12 @@
                   <span class="selc-trail">{{ selected.route_path || "langsung" }}</span>
                 </div>
                 <div class="selc-side">
-                  <span class="bdg" :class="selSosCount > 0 ? 'bad' : 'ok'">{{ selSosCount > 0 ? "sos" : "normal" }}</span>
-                  <span v-if="selDiag?.stale" class="bdg bad" :title="`tidak ada paket > ${diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
-                  <span v-if="selected.gps_valid === false" class="bdg bad" title="Nsat < 4, HDOP > 5, atau tanpa fix: posisi di peta = lokasi terakhir">gps invalid · lokasi terakhir</span>
+                  <span class="bdg" :class="selSosCount > 0 ? 'bad' : 'ok'">{{ selSosCount > 0 ? "SOS" : "Normal" }}</span>
+                  <span v-if="selDiag?.stale" class="bdg bad" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
+                  <span v-if="selected.gps_valid === false" class="bdg bad" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta = lokasi terakhir">GPS tidak valid · lokasi terakhir</span>
                   <div class="selc-batt" :class="battClass(selected.battery_pct)">
                     <strong>{{ selected.battery_pct != null ? `${selected.battery_pct}%` : "—" }}</strong>
-                    <span>baterai</span>
+                    <span>Baterai</span>
                   </div>
                   <div class="selc-seen">{{ fmtTime(selected.recorded_at) }} · terakhir terlihat</div>
                 </div>
@@ -37,25 +37,27 @@
               <div class="selc-grid primary">
                 <div class="selc-cell">
                   <strong>{{ selected.elevation != null ? `${selected.elevation} m` : "—" }}</strong>
-                  <span>ketinggian</span>
+                  <span>Ketinggian</span>
                 </div>
                 <div class="selc-cell">
                   <strong>{{ fmtPos(selected) }}</strong>
-                  <span>posisi</span>
+                  <span>Posisi</span>
                 </div>
               </div>
 
               <div class="selc-grid secondary">
-                <div class="selc-cell sm"><strong>{{ selected.rssi_dbm != null ? `${selected.rssi_dbm} dBm` : "—" }}</strong><span>rssi</span></div>
-                <div class="selc-cell sm"><strong>{{ selected.hop_count ?? "—" }}</strong><span>hop</span></div>
-                <div class="selc-cell sm"><strong>{{ selected.satellites ?? "—" }} / {{ selected.hdop ?? "—" }}</strong><span>gps sat/hdop</span></div>
-                <div class="selc-cell sm"><strong class="placeholder">—</strong><span>cuaca</span></div>
-                <div class="selc-cell sm"><strong class="placeholder">—</strong><span>kontrol</span></div>
-                <div class="selc-cell sm"><strong>{{ selSosCount }}</strong><span>sos count</span></div>
+                <div class="selc-cell sm" title="Kekuatan sinyal radio yang diterima base (RSSI). Makin mendekati 0 dBm makin kuat; di bawah sekitar −110 dBm hampir putus."><strong>{{ selected.rssi_dbm != null ? `${selected.rssi_dbm} dBm` : "—" }}</strong><span>Kekuatan sinyal</span></div>
+                <div class="selc-cell sm" title="Jumlah relay yang dilewati paket sebelum sampai ke base (hop). Langsung = tanpa relay."><strong>{{ hopText(selected.hop_count) }}</strong><span>Lewat relay</span></div>
+                <div class="selc-cell sm" title="Jumlah satelit GPS / ketelitian GPS (HDOP). HDOP makin kecil makin teliti; di atas 5 dianggap tidak valid."><strong>{{ selected.satellites ?? "—" }} / {{ selected.hdop ?? "—" }}</strong><span>Satelit / ketelitian GPS</span></div>
+                <template v-if="uiStore.advanced">
+                  <div class="selc-cell sm"><strong class="placeholder">—</strong><span>Cuaca</span></div>
+                  <div class="selc-cell sm"><strong class="placeholder">—</strong><span>Kontrol</span></div>
+                </template>
+                <div class="selc-cell sm"><strong>{{ selSosCount }}</strong><span>Jumlah SOS</span></div>
               </div>
             </div>
             <div class="selc" v-else>
-              <div class="selr"><strong>—</strong><span style="font-size: 9px; color: var(--muted)">klik pendaki untuk detail</span></div>
+              <div class="selr"><strong>—</strong><span style="font-size: 13px; color: var(--muted)">Klik pendaki untuk detail</span></div>
               <div class="selb">Pilih pendaki dari daftar atau klik marker di peta.</div>
             </div>
           </div>
@@ -63,10 +65,10 @@
 
         <!-- tabs -->
         <div class="pnl" style="flex-shrink: 0">
-          <div class="pb" style="padding: 5px 7px">
-            <div class="tabs">
-              <button v-for="t in tabs" :key="t" class="tab" :class="{ active: activeTab === t }" @click="activeTab = t">
-                {{ t }}
+          <div class="pb" style="padding: 8px 12px">
+            <div class="tabs" role="tablist" aria-label="Daftar pemantauan" :style="{ '--tabs': tabs.length }">
+              <button v-for="t in tabs" :key="t" class="tab" role="tab" :aria-selected="activeTab === t" :class="{ active: activeTab === t }" @click="activeTab = t">
+                {{ TAB_LABELS[t] }}
                 <span v-if="t === 'sos' && alertStore.alerts.length" class="tab-badge">{{ alertStore.alerts.length }}</span>
               </button>
             </div>
@@ -75,24 +77,28 @@
 
         <!-- tab: hikers -->
         <div v-if="activeTab === 'hikers'" class="pnl pnl-fill">
-          <div class="ph"><div class="tl">daftar pendaki</div><div class="sv">{{ hikerCodes.length }}</div></div>
+          <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>Daftar pendaki</div><div class="sv">{{ hikerCodes.length }}</div></div>
           <div class="pb" style="overflow-y: auto; flex: 1; min-height: 0">
-            <div v-if="!hikerCodes.length" class="empty">menunggu data…</div>
+            <div v-if="!hikerCodes.length" class="empty">Menunggu data…</div>
             <div v-else class="hgrid">
               <div
-                v-for="code in hikerCodes"
+                v-for="(code, idx) in hikerCodes"
                 :key="code"
                 class="hcard"
                 :class="{ sel: code === hikerStore.selectedCode, sos: sosCountFor(code) > 0 }"
                 @click="hikerStore.selectHiker(code)"
               >
                 <div class="ht">
-                  <span class="hid">{{ code }}</span>
-                  <span class="bdg" :class="sosCountFor(code) > 0 ? 'bad' : 'ok'">{{ sosCountFor(code) > 0 ? "sos" : "ok" }}</span>
-                </div>
-                <div class="hpos">
-                  {{ hikerStore.hikers[code].battery_pct != null ? `${hikerStore.hikers[code].battery_pct}%` : "bat —" }}
-                  · {{ fmtTime(hikerStore.hikers[code].recorded_at) }}
+                  <span class="hnum">{{ idx + 1 }}</span>
+                  <div class="hid-wrap">
+                    <span class="hid">{{ code }}</span>
+                    <span class="hpos">
+                      {{ hikerStore.hikers[code].battery_pct != null ? `${hikerStore.hikers[code].battery_pct}%` : "Baterai —" }}
+                      · {{ fmtTime(hikerStore.hikers[code].recorded_at) }}
+                    </span>
+                  </div>
+                  <span class="bdg" :class="sosCountFor(code) > 0 ? 'bad' : 'ok'">{{ sosCountFor(code) > 0 ? "SOS" : "OK" }}</span>
+                  <svg class="hchev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
                 </div>
                 <GpxExportButton :hiker-code="code" @click.stop />
               </div>
@@ -102,16 +108,16 @@
 
         <!-- tab: links -->
         <div v-if="activeTab === 'links'" class="pnl pnl-fill">
-          <div class="ph"><div class="tl">link lora aktif</div><div class="sv">{{ diagStore.list.length }}</div></div>
+          <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0" /><circle cx="12" cy="12" r="1" /></svg>Link radio aktif</div><div class="sv">{{ diagStore.list.length }}</div></div>
           <div class="pb" style="overflow-y: auto; flex: 1; min-height: 0">
-            <div v-if="!diagStore.list.length" class="empty">belum ada paket masuk dari sesi aktif</div>
+            <div v-if="!diagStore.list.length" class="empty">Belum ada paket masuk dari sesi aktif</div>
             <div v-else class="lnkl">
               <div v-for="d in diagStore.list" :key="d.session_id" class="lnk" style="cursor: pointer" @click="hikerStore.selectHiker(d.hiker_code)">
-                <div class="etit"><span>{{ d.hiker_code }} · {{ d.route_path || "langsung" }}</span><span class="bdg" :class="d.stale ? 'bad' : 'ok'">{{ d.stale ? `diam ${fmtAge(d.silent_s)}` : "terdengar" }}</span></div>
+                <div class="etit"><span>{{ d.hiker_code }} · {{ d.route_path || "langsung" }}</span><span class="bdg" :class="d.stale ? 'bad' : 'ok'">{{ d.stale ? `Tidak terdengar ${fmtAge(d.silent_s)}` : "Terdengar" }}</span></div>
                 <div class="emeta">
-                  rssi {{ d.rssi_dbm ?? "—" }} dBm · {{ d.hop_count ?? "—" }} hop · jarak ke base {{ diagStore.baseSet ? fmtDist(d.dist_to_base_m) : "(set base di Setup)" }}<br />
-                  pdr {{ d.pdr != null ? `${d.pdr}%` : "—" }} ({{ d.received }} diterima, {{ d.missing }} hilang) · latency {{ d.latency_p50_s != null ? `${d.latency_p50_s} s (p95 ${d.latency_p95_s} s)` : "—" }}<br />
-                  gps {{ d.gps_valid ? "valid" : "invalid" }} · {{ d.satellites ?? "—" }} sat / hdop {{ d.hdop ?? "—" }} · {{ d.gps_bad_packets }} paket tanpa fix/invalid
+                  <span title="RSSI">Kekuatan sinyal</span> {{ d.rssi_dbm ?? "—" }} dBm · {{ hopText(d.hop_count) }} · jarak ke base {{ diagStore.baseSet ? fmtDist(d.dist_to_base_m) : "(atur base di Setup lokasi)" }}<br />
+                  <span title="PDR: persentase paket yang sampai ke base">Paket yang sampai</span> {{ d.pdr != null ? `${d.pdr}%` : "—" }} ({{ d.received }} diterima, {{ d.missing }} hilang) · <span title="Latency: selisih waktu paket diterima dengan waktu GPS alat">tunda data</span> {{ d.latency_p50_s != null ? `${d.latency_p50_s} dtk (p95 ${d.latency_p95_s} dtk)` : "—" }}<br />
+                  GPS {{ d.gps_valid ? "valid" : "tidak valid" }} · {{ d.satellites ?? "—" }} satelit · <span title="HDOP: makin kecil makin teliti">ketelitian GPS</span> {{ d.hdop ?? "—" }} · {{ d.gps_bad_packets }} paket tanpa fix/tidak valid
                 </div>
               </div>
             </div>
@@ -120,19 +126,19 @@
 
         <!-- tab: events -->
         <div v-if="activeTab === 'log'" class="pnl pnl-fill">
-          <div class="ph"><div class="tl">packet log · {{ diagStore.packetsFor || "—" }}</div><div class="sv">{{ diagStore.packets.length }}</div></div>
+          <div class="ph"><div class="tl">Log paket · {{ diagStore.packetsFor || "—" }}</div><div class="sv">{{ diagStore.packets.length }}</div></div>
           <div class="pb" style="overflow-y: auto; flex: 1; min-height: 0">
             <RssiScatter :packets="diagStore.packets" :base-set="diagStore.baseSet" />
-            <div v-if="!diagStore.packets.length" class="empty">pilih pendaki yang sudah mengirim paket</div>
+            <div v-if="!diagStore.packets.length" class="empty">Pilih pendaki yang sudah mengirim paket</div>
             <div v-else class="evl">
               <div v-for="p in diagStore.packets.slice(0, 60)" :key="`${p.sequence}-${p.received_at}`" class="ev">
                 <div class="etit">
                   <span>#{{ p.sequence ?? "?" }} · {{ fmtClock(p.received_at) }}</span>
-                  <span class="bdg" :class="p.gps_valid ? 'ok' : 'bad'">{{ p.gps_valid ? "fix" : "tanpa fix" }}</span>
+                  <span class="bdg" :class="p.gps_valid ? 'ok' : 'bad'">{{ p.gps_valid ? "Ada fix GPS" : "Tanpa fix GPS" }}</span>
                 </div>
                 <div class="emeta">
-                  rssi {{ p.rssi_dbm ?? "—" }} dBm · {{ fmtDist(p.dist_to_base_m) }} · {{ p.route_path || "langsung" }} ({{ p.hop_count ?? "—" }} hop)<br />
-                  {{ p.satellites ?? "—" }} sat / hdop {{ p.hdop ?? "—" }} · latency {{ p.latency_s != null ? `${p.latency_s} s` : "—" }}<template v-if="p.missing_since_previous"> · <b style="color: var(--red)">{{ p.missing_since_previous }} hilang sebelumnya</b></template>
+                  <span title="RSSI">Kekuatan sinyal</span> {{ p.rssi_dbm ?? "—" }} dBm · {{ fmtDist(p.dist_to_base_m) }} · {{ p.route_path || "langsung" }} ({{ hopText(p.hop_count) }})<br />
+                  {{ p.satellites ?? "—" }} satelit / <span title="HDOP">ketelitian GPS</span> {{ p.hdop ?? "—" }} · <span title="Latency">tunda data</span> {{ p.latency_s != null ? `${p.latency_s} dtk` : "—" }}<template v-if="p.missing_since_previous"> · <b style="color: var(--red)">{{ p.missing_since_previous }} paket hilang sebelumnya</b></template>
                 </div>
               </div>
             </div>
@@ -141,14 +147,14 @@
 
         <!-- tab: sos -->
         <div v-if="activeTab === 'sos'" class="pnl pnl-fill">
-          <div class="ph"><div class="tl">sos aktif</div><div class="sv">{{ alertStore.alerts.length }}</div></div>
+          <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M12 3l10 18H2z" /><path d="M12 10v5M12 18h.01" /></svg>SOS aktif</div><div class="sv">{{ alertStore.alerts.length }}</div></div>
           <div class="pb" style="overflow-y: auto; flex: 1; min-height: 0">
-            <div v-if="!alertStore.alerts.length" class="empty">belum ada sos 👍</div>
+            <div v-if="!alertStore.alerts.length" class="empty">Belum ada SOS</div>
             <div v-else class="sosl">
               <div v-for="a in alertStore.alerts" :key="a.id" class="sosev">
-                <div class="etit"><span>{{ a.hiker_code }}</span><span class="bdg bad">🆘 {{ a.alert_type }}</span></div>
+                <div class="etit"><span>{{ a.hiker_code }}</span><span class="bdg bad">{{ alertLabel(a.alert_type) }}</span></div>
                 <div class="emeta">{{ fmtTime(a.triggered_at) }}</div>
-                <button class="ack-btn" @click="alertStore.acknowledge(a.id)">Acknowledge</button>
+                <button class="ack-btn" @click="alertStore.acknowledge(a.id)">Tandai sudah ditangani</button>
               </div>
             </div>
           </div>
@@ -165,14 +171,26 @@ import { useAlertStore } from "../stores/alerts";
 import { useDiagnosticsStore } from "../stores/diagnostics";
 import GpxExportButton from "./GpxExportButton.vue";
 import RssiScatter from "./RssiScatter.vue";
+import { useUiStore } from "../stores/ui";
+import { alertLabel } from "../utils/alerts";
 
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
 const diagStore = useDiagnosticsStore();
+const uiStore = useUiStore();
 const collapsed = ref(false);
 
-const tabs = ["hikers", "links", "log", "sos"];
+// Tampilan harian cukup daftar pendaki + SOS. Diagnostik link & log paket muncul di mode lanjutan.
+const TAB_LABELS = { hikers: "Pendaki", links: "Link", log: "Log paket", sos: "SOS" };
+const tabs = computed(() => (uiStore.advanced ? ["hikers", "links", "log", "sos"] : ["hikers", "sos"]));
 const activeTab = ref("hikers");
+watch(tabs, (t) => {
+  if (!t.includes(activeTab.value)) activeTab.value = "hikers";
+});
+function hopText(n) {
+  if (n == null) return "—";
+  return n === 0 ? "Langsung" : `${n} relay`;
+}
 
 // selectedCode HIDUP DI STORE (bukan ref lokal lagi), biar MapView.vue
 // bisa baca & ikut nge-highlight marker yang sama - satu sumber
@@ -222,3 +240,8 @@ function fmtTime(ts) {
   return new Date(ts).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
 }
 </script>
+
+<style scoped>
+.sosev .ack-btn { background: var(--red); color: #fff; }
+.sosev .ack-btn:hover:not(:disabled) { background: var(--red); filter: brightness(0.92); }
+</style>

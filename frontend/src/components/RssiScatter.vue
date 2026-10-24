@@ -84,17 +84,17 @@ const fit = computed(() => {
 </script>
 
 <style scoped>
-.rs { border: 1px solid var(--line); border-radius: 9px; background: var(--panel-3); padding: 7px 8px; margin-bottom: 7px; }
-.rs-h { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-bottom: 4px; }
-.rs-h strong { font-size: 8px; font-weight: 700; color: var(--muted); letter-spacing: 0.1em; text-transform: uppercase; }
-.rs-h span, .rs-fit span { font-size: 8.5px; color: var(--muted); }
-.rs-empty { height: 56px; display: flex; align-items: center; justify-content: center; font-size: 9px; color: var(--muted); text-align: center; }
+.rs { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; padding: 0 0 12px; margin-bottom: 12px; }
+.rs-h { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; margin-bottom: 6px; }
+.rs-h strong { font-size: 11px; font-weight: 700; color: var(--text-2); letter-spacing: 0.06em; text-transform: uppercase; }
+.rs-h span, .rs-fit span { font-size: 11px; color: var(--muted); }
+.rs-empty { height: 56px; display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); text-align: center; }
 svg { width: 100%; height: 150px; display: block; }
-.grid { stroke: var(--line-2); stroke-width: 1; }
-.tick { fill: var(--muted); font-size: 8px; }
-.dot { fill: var(--blue); fill-opacity: 0.75; }
-.fit { fill: none; stroke: var(--amber); stroke-width: 1.5; stroke-dasharray: 4 3; }
-.band { fill: none; stroke: var(--amber); stroke-width: 1; stroke-opacity: 0.45; stroke-dasharray: 2 3; }
-.rs-fit { font-size: 10px; color: var(--text-2); margin-top: 4px; }
+.grid { stroke: var(--line); stroke-width: 1; }
+.tick { fill: var(--muted); font-size: 9px; }
+.dot { fill: var(--accent); fill-opacity: 0.85; }
+.fit { fill: none; stroke: var(--text-2); stroke-width: 1.5; stroke-dasharray: 4 3; }
+.band { fill: none; stroke: var(--text-2); stroke-width: 1; stroke-opacity: 0.45; stroke-dasharray: 2 3; }
+.rs-fit { font-size: 12px; color: var(--text-2); margin-top: 6px; }
 .rs-fit b { color: var(--text); }
 </style>

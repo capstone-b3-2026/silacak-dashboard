@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiLacak | Pengaturan</title>
+<style>
+  :root { color-scheme: dark; --bg:#0f1521; --card:#171f2f; --line:#2a3550; --text:#e6ebf5; --mut:#97a3bd; --acc:#4f8ef7; --ok:#3fb27f; --bad:#e5645f; }
+  * { box-sizing: border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; background:var(--bg); color:var(--text);
+         font:16px/1.5 system-ui, "Segoe UI", Roboto, sans-serif; padding:24px; }
+  main { width:100%; max-width:640px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:32px; }
+  h1 { margin:0 0 4px; font-size:22px; letter-spacing:.04em; }
+  h2 { margin:28px 0 8px; font-size:15px; text-transform:uppercase; letter-spacing:.08em; color:var(--mut); }
+  p { margin:8px 0; } .mut { color:var(--mut); font-size:14px; }
+  button { font:inherit; cursor:pointer; border-radius:10px; border:1px solid var(--line); background:transparent; color:var(--text); padding:12px 18px; }
+  button.primary { background:var(--acc); border-color:var(--acc); color:#07101f; font-weight:600; }
+  button:hover { filter:brightness(1.12); } button:disabled { opacity:.5; cursor:default; }
+  .choices { display:flex; flex-direction:column; gap:10px; margin-top:18px; }
+  .field { margin:18px 0; } .field label { display:block; font-weight:600; margin-bottom:6px; }
+  .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  input[type=number], select { font:inherit; background:#0f1521; color:var(--text); border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  input[type=number] { width:140px; }
+  .unit { color:var(--mut); } .hint { color:var(--mut); font-size:13px; margin-top:6px; }
+  #msg { min-height:1.5em; margin-top:18px; } #msg.err { color:var(--bad); } #msg.ok { color:var(--ok); }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--mut); margin-right:8px; }
+  .dot.ok { background:var(--ok); } .dot.bad { background:var(--bad); }
+  .actions { display:flex; gap:10px; margin-top:24px; flex-wrap:wrap; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SiLacak</h1>
+  <p class="mut">Basecamp Dashboard</p>
+
+  <section id="step-ask">
+    <h2>Selamat datang</h2>
+    <p>Apakah ada pengaturan khusus yang perlu diubah sebelum mulai?</p>
+    <p class="mut">Kalau belum yakin, pilih &ldquo;Tidak tahu&rdquo;. Pengaturan bawaan sudah aman dipakai dan bisa diubah kapan saja di alamat <b>/pengaturan</b>.</p>
+    <div class="choices">
+      <button id="btn-no">Tidak, pakai pengaturan bawaan</button>
+      <button id="btn-unsure">Tidak tahu, pakai pengaturan bawaan</button>
+      <button id="btn-yes" class="primary">Ya, saya mau mengatur</button>
+    </div>
+  </section>
+
+  <section id="step-form" hidden>
+    <h2>Pengaturan alarm</h2>
+    <div id="fields"></div>
+
+    <h2>Base station</h2>
+    <p id="base-line"><span class="dot" id="base-dot"></span><span id="base-text">Memeriksa...</span></p>
+    <div class="row" id="base-pick" hidden>
+      <select id="port-select" aria-label="Pilih port base station"></select>
+      <button id="btn-port">Gunakan port ini</button>
+    </div>
+
+    <div class="actions">
+      <button id="btn-save" class="primary">Simpan dan buka dashboard</button>
+      <button id="btn-defaults">Kembalikan semua ke bawaan</button>
+      <button id="btn-back" hidden>Kembali</button>
+    </div>
+  </section>
+
+  <p id="msg" role="status"></p>
+</main>
+
+<script>
+"use strict";
+var state = null;
+var $ = function (id) { return document.getElementById(id); };
+
+function showMsg(text, kind) {
+  var el = $("msg");
+  el.textContent = text || "";
+  el.className = kind || "";
+}
+
+function api(path, opts) {
+  opts = opts || {};
+  opts.headers = { "Content-Type": "application/json" };
+  return fetch("/api/v1" + path, opts).then(function (r) {
+    return r.text().then(function (text) {
+      var data = null;
+      try { data = JSON.parse(text); } catch (e) { /* bukan JSON */ }
+      if (!r.ok) {
+        var d = data && data.detail;
+        throw new Error(typeof d === "string" ? d : "Gagal (kode " + r.status + ").");
+      }
+      return data;
+    });
+  });
+}
+
+function finish() {
+  showMsg("Tersimpan. Membuka dashboard...", "ok");
+  setTimeout(function () { location.href = "/"; }, 800);
+}
+
+function showForm() {
+  $("step-ask").hidden = true;
+  $("step-form").hidden = false;
+  $("btn-back").hidden = location.pathname.indexOf("/awal") !== 0;
+  showMsg("");
+}
+
+function renderFields() {
+  var box = $("fields");
+  while (box.firstChild) box.removeChild(box.firstChild);
+  state.fields.forEach(function (f) {
+    var wrap = document.createElement("div");
+    wrap.className = "field";
+    var label = document.createElement("label");
+    label.textContent = f.label;
+    label.htmlFor = "f-" + f.key;
+    var row = document.createElement("div");
+    row.className = "row";
+    var input = document.createElement("input");
+    input.type = "number";
+    input.id = "f-" + f.key;
+    input.dataset.key = f.key;
+    input.min = f.min;
+    input.max = f.max;
+    input.step = f.type === "int" ? "1" : "any";
+    input.value = f.value;
+    var unit = document.createElement("span");
+    unit.className = "unit";
+    unit.textContent = f.unit;
+    row.appendChild(input);
+    row.appendChild(unit);
+    var hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = f.help + " (Bawaan: " + f.default + " " + f.unit + ")";
+    wrap.appendChild(label);
+    wrap.appendChild(row);
+    wrap.appendChild(hint);
+    box.appendChild(wrap);
+  });
+}
+
+function collectValues() {
+  var values = {};
+  document.querySelectorAll("#fields input").forEach(function (inp) {
+    values[inp.dataset.key] = inp.value === "" ? null : Number(inp.value);
+  });
+  return values;
+}
+
+function saveDefault() {
+  return api("/app-config", { method: "PUT", body: JSON.stringify({ mode: "default", values: {} }) })
+    .then(finish)
+    .catch(function (e) { showMsg(e.message, "err"); });
+}
+
+function saveCustom() {
+  showMsg("Menyimpan...");
+  return api("/app-config", { method: "PUT", body: JSON.stringify({ mode: "custom", values: collectValues() }) })
+    .then(finish)
+    .catch(function (e) { showMsg(e.message, "err"); });
+}
+
+/* ---- base station ---- */
+var BASE_TEXT = {
+  connected: function (s) { return "Terhubung ke " + s.port + "."; },
+  searching: function () { return "Belum ada base station terdeteksi. Colok kabel USB base station."; },
+  ambiguous: function () { return "Ditemukan lebih dari satu perangkat USB. Pilih port base station di bawah."; },
+  reconnecting: function (s) { return s.last_error || "Mencoba menyambung kembali..."; },
+  unavailable: function (s) { return s.last_error || "Pembacaan serial tidak tersedia."; },
+  off: function () { return "Pembacaan serial dimatikan di konfigurasi."; }
+};
+
+function refreshBase() {
+  return api("/base/status").then(function (s) {
+    var fn = BASE_TEXT[s.state] || function () { return s.state; };
+    $("base-text").textContent = fn(s);
+    $("base-dot").className = "dot" + (s.state === "connected" ? " ok" : (s.state === "off" ? "" : " bad"));
+    var pick = $("base-pick");
+    pick.hidden = !s.enabled;
+    if (!s.enabled) return null;
+    return api("/base/ports").then(function (ports) {
+      var sel = $("port-select");
+      var current = sel.value;
+      while (sel.firstChild) sel.removeChild(sel.firstChild);
+      var auto = document.createElement("option");
+      auto.value = "auto";
+      auto.textContent = "Otomatis (disarankan)";
+      sel.appendChild(auto);
+      ports.forEach(function (p) {
+        var o = document.createElement("option");
+        o.value = p.device;
+        o.textContent = p.device + (p.description ? " - " + p.description : "");
+        sel.appendChild(o);
+      });
+      sel.value = current || s.requested || "auto";
+      if (sel.value !== (current || s.requested || "auto")) sel.value = "auto";
+    });
+  }).catch(function () {
+    $("base-text").textContent = "Status base station tidak bisa dibaca.";
+    $("base-dot").className = "dot bad";
+  });
+}
+
+function usePort() {
+  api("/base/port", { method: "POST", body: JSON.stringify({ port: $("port-select").value }) })
+    .then(function () { showMsg("Port dipilih.", "ok"); return refreshBase(); })
+    .catch(function (e) { showMsg(e.message, "err"); });
+}
+
+/* ---- mulai ---- */
+$("btn-no").onclick = saveDefault;
+$("btn-unsure").onclick = saveDefault;
+$("btn-yes").onclick = showForm;
+$("btn-save").onclick = saveCustom;
+$("btn-defaults").onclick = saveDefault;
+$("btn-back").onclick = function () { $("step-form").hidden = true; $("step-ask").hidden = false; showMsg(""); };
+$("btn-port").onclick = usePort;
+
+api("/app-config").then(function (s) {
+  state = s;
+  renderFields();
+  if (location.pathname.indexOf("/pengaturan") === 0) showForm();
+  refreshBase();
+  setInterval(function () { if (!$("step-form").hidden) refreshBase(); }, 3000);
+}).catch(function (e) { showMsg("Tidak bisa terhubung ke SiLacak: " + e.message, "err"); });
+</script>
+</body>
+</html>

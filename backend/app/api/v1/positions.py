@@ -1,7 +1,8 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from app.core.database import get_db
 from app.repositories import position_repo
+from app.services.geo import thin_track
 
 router = APIRouter(prefix="/positions", tags=["positions"])
 
@@ -14,5 +15,9 @@ async def latest_positions(conn=Depends(get_db)):
 
 
 @router.get("/{hiker_code}/track")
-async def hiker_track(hiker_code: str, conn=Depends(get_db)):
-    return await position_repo.get_track_points(conn, hiker_code)
+async def hiker_track(
+    hiker_code: str,
+    max_points: int = Query(1500, ge=0, le=100000, description="Jarangkan jejak untuk TAMPILAN (0 = semua titik). Data di DB & GPX tetap penuh."),
+    conn=Depends(get_db),
+):
+    return thin_track(await position_repo.get_track_points(conn, hiker_code), max_points)

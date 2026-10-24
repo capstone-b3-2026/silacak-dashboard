@@ -465,7 +465,7 @@ async def calibration(session_id: int | None = None, hours: int = 72, max_km: fl
         raise HTTPException(400, "Titik base belum diset.")
     rows = await conn.fetch(
         """
-        SELECT ST_Y(p.location::geometry) AS lat, ST_X(p.location::geometry) AS lon, p.rssi_dbm
+        SELECT (p.location)[1] AS lat, (p.location)[0] AS lon, p.rssi_dbm
         FROM positions p
         WHERE p.hop_count = 0 AND p.rssi_dbm IS NOT NULL AND p.location IS NOT NULL
           AND COALESCE(p.gps_valid, TRUE)
