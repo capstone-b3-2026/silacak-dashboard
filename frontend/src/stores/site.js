@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import {
   fetchActiveSite, uploadDem, saveSiteInputs, computeRelayPlan, dismissFailedUpload, saveRelayPositions,
-  uploadCanopy, deleteCanopy, fetchCalibration,
+  uploadCanopy, deleteCanopy, fetchCalibration, fetchTrailDistance3d,
 } from "../services/api";
 
 export const useSiteStore = defineStore("site", {
@@ -13,8 +13,10 @@ export const useSiteStore = defineStore("site", {
     calibration: null, // hasil GET /sites/active/calibration (saran offset & margin fading)
     calibrating: false,
     error: null,
+    trail3d: null, // hasil POST /sites/active/trail-distance (profil 3D dari DEM); null = belum/tak tersedia
     _timer: null,
     _planTimer: null,
+    _trail3dTimer: null,
   }),
   getters: {
     ready: (s) => s.site?.status === "ready",
@@ -140,6 +142,28 @@ export const useSiteStore = defineStore("site", {
       if (auto && this.site.base && this.site.trail.length >= 2 && !this.site.plan?.manual) {
         this._planTimer = setTimeout(() => this.runPlan(), 1200);
       }
+      // Angka 3D (profil dari DEM) hanya BONUS/sekunder: hitung dengan cadence ringan (debounce) supaya
+      // menggambar banyak titik tidak membanjiri backend. Angka horizontal (FEAT-001) sudah tampil instan
+      // dari helper murni di frontend tanpa menunggu ini.
+      this.refreshTrail3d();
+    },
+    // Ambil jarak 3D profil dari DEM, DEBOUNCED (800 ms). Hanya saat DEM siap & base + >= 2 titik trail.
+    // Error jaringan ditelan rapi (trail3d = null) supaya tidak mengganggu angka horizontal.
+    refreshTrail3d() {
+      clearTimeout(this._trail3dTimer);
+      const ok = this.site?.status === "ready" && this.site?.base && (this.site?.trail?.length || 0) >= 2;
+      if (!ok) {
+        this.trail3d = null;
+        return;
+      }
+      const payload = { base: this.site.base, trail: this.site.trail };
+      this._trail3dTimer = setTimeout(async () => {
+        try {
+          this.trail3d = await fetchTrailDistance3d(payload);
+        } catch {
+          this.trail3d = null;
+        }
+      }, 800);
     },
     // Relay digeser di peta (Setup aktif). Posisi baru disimpan & tiap link dinilai ulang dari DEM.
     async moveRelay(n, lat, lon) {

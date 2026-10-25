@@ -139,8 +139,10 @@ async function choose(port) {
 .bb-status.ok .bb-dot { background: var(--green); }
 .bb-status.warn { color: var(--text); }
 .bb-status.warn .bb-dot { background: var(--amber); }
-.bb-status.bad { background: var(--red); color: #fff; padding: 4px 12px; }
-.bb-status.bad .bb-dot { background: #fff; }
+/* Kegagalan koneksi base (terputus/USB/tak terjangkau) = PERINGATAN operasional, bukan SOS.
+   Pakai amber, bukan merah (merah = SOS saja). Tetap menonjol dengan latar penuh + ikon. */
+.bb-status.bad { background: var(--amber); color: var(--on-amber); padding: 4px 12px; }
+.bb-status.bad .bb-dot { background: var(--on-amber); }
 .bb-status.off { color: var(--text-2); }
 .bb-icon { display: none; }
 .bb-port { font-weight: 600; opacity: 0.9; font-size: 12px; }
@@ -154,8 +156,8 @@ async function choose(port) {
 .bb-btn:hover:not(:disabled) { background: var(--blue-glow); }
 .bb-btn:disabled { opacity: 0.5; cursor: wait; }
 .bb-btn.attn { background: var(--accent-glow); border-color: var(--accent); }
-.bb-btn.warn { border-color: var(--btn); background: var(--btn); color: var(--on-btn); }
-.bb-btn.warn:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--btn-hover); }
+.bb-btn.warn { border-color: var(--btn-alt); background: var(--btn-alt); color: var(--on-btn-alt); }
+.bb-btn.warn:hover:not(:disabled) { background: var(--btn-alt-hover); border-color: var(--btn-alt-hover); }
 .bb-btn.ok { color: var(--green); border-color: var(--green); }
 .bb-btn.ok:hover:not(:disabled) { background: var(--green-bg); }
 .bb-pop {
@@ -172,6 +174,6 @@ async function choose(port) {
 .bb-tag { margin-left: 6px; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--line-3); color: var(--text-2); }
 .bb-tag.on { color: var(--green); border-color: var(--green); }
 .bb-empty { font-size: 13px; color: var(--text-2); padding: 6px 2px; }
-.bb-err { font-size: 13px; color: var(--text); background: var(--red-bg); border: 1px solid var(--red); border-radius: 8px; padding: 8px 10px; }
+.bb-err { font-size: 13px; color: var(--text); background: var(--amber-glow); border: 1px solid var(--amber); border-radius: 8px; padding: 8px 10px; }
 @media (max-width: 1100px) { .base-bar { position: fixed; left: 8px; right: 8px; bottom: 8px; border: 1px solid var(--line); border-radius: var(--rs); max-width: none; } }
 </style>

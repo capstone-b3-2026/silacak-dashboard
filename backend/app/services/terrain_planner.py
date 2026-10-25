@@ -709,6 +709,80 @@ def _densify(points: list[tuple[float, float]], step_km: float):
     return np.array(lats), np.array(lons), widx
 
 
+def _as_latlon(p) -> tuple[float, float]:
+    """Terima titik sebagai {'lat','lon'} atau (lat, lon)/[lat, lon] -> (lat, lon) float."""
+    if isinstance(p, dict):
+        return (float(p["lat"]), float(p["lon"]))
+    return (float(p[0]), float(p[1]))
+
+
+def trail_profile_3d(elev_src: ElevationSource, base, trail, step_km: float = TRAIL_STEP_KM) -> dict:
+    """Jarak PROFIL PENUH 3D sepanjang jalur base -> titik1 -> titik2 -> ...
+
+    Ini profil sesungguhnya: tiap segmen DIDENSIFY dulu (reuse _densify) lalu elevasi semua
+    sub-titik diambil sekaligus (reuse elevation_many). Jarak 3D segmen = jumlah
+    sqrt(d_horizontal^2 + d_elevasi^2) di SETIAP sub-segmen kecil — BUKAN sekadar menarik garis
+    antara dua ujung segmen (itu akan mengabaikan naik-turun di tengah jalur).
+
+    Konvensi (bug #1 proyek): base dan tiap titik trail memakai urutan (lat, lon). base boleh
+    {'lat','lon'} atau (lat, lon); trail = [(lat, lon), ...] atau [[lat, lon], ...].
+
+    Kejujuran ketidakpastian: bila SALAH SATU sub-titik suatu segmen jatuh di luar cakupan DEM
+    (elevation_many -> NaN), jarak 3D segmen itu = None (JANGAN mengarang elevasi) dan total 3D
+    ditandai tidak lengkap (incomplete=True). Jarak horizontal (Haversine R=6371008.8 m lewat
+    haversine_m backend konsisten dengan geo.py) tetap dihitung untuk setiap segmen sebagai
+    cross-check dan selalu lengkap.
+
+    Return dict siap-JSON:
+      {
+        "total_horizontal_m": float,
+        "total_3d_m": float | None,     # None bila ada segmen di luar DEM
+        "incomplete": bool,
+        "segments": [{"from": label, "to": label, "horizontal_m": float, "dist_3d_m": float|None}, ...],
+      }
+    """
+    from app.services.geo import haversine_m  # acuan tunggal R=6371008.8 m (sama dengan SQL geo_dist_m)
+
+    base_ll = None if base is None else _as_latlon(base)
+    pts = [_as_latlon(p) for p in (trail or [])]
+    chain = ([base_ll] + pts) if base_ll is not None else pts
+    labels = (["Base"] if base_ll is not None else []) + [f"Titik {i}" for i in range(1, len(pts) + 1)]
+
+    segments: list[dict] = []
+    total_h = 0.0
+    total_3d = 0.0
+    incomplete = False
+
+    for (a, b), from_lbl, to_lbl in zip(zip(chain, chain[1:]), labels, labels[1:]):
+        horizontal_m = haversine_m(a[0], a[1], b[0], b[1])
+        total_h += horizontal_m
+
+        # Profil penuh: densify segmen ini lalu ambil elevasi semua sub-titik sekaligus.
+        s_lat, s_lon, _ = _densify([a, b], step_km)
+        ground = elev_src.elevation_many(s_lat, s_lon)
+        if np.isnan(ground).any():
+            # Ada sub-titik di luar DEM: jangan mengarang elevasi. Segmen ini 3D tidak diketahui.
+            segments.append({"from": from_lbl, "to": to_lbl, "horizontal_m": horizontal_m, "dist_3d_m": None})
+            incomplete = True
+            continue
+
+        # Jarak horizontal tiap sub-segmen (Haversine konsisten) + beda elevasi -> sisi miring.
+        seg_3d = 0.0
+        for i in range(len(s_lat) - 1):
+            dh = haversine_m(float(s_lat[i]), float(s_lon[i]), float(s_lat[i + 1]), float(s_lon[i + 1]))
+            dz = float(ground[i + 1] - ground[i])
+            seg_3d += math.sqrt(dh * dh + dz * dz)
+        segments.append({"from": from_lbl, "to": to_lbl, "horizontal_m": horizontal_m, "dist_3d_m": seg_3d})
+        total_3d += seg_3d
+
+    return {
+        "total_horizontal_m": total_h,
+        "total_3d_m": None if incomplete else total_3d,
+        "incomplete": incomplete,
+        "segments": segments,
+    }
+
+
 @dataclass
 class _St:
     node: int

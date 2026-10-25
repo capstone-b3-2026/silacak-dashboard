@@ -178,10 +178,10 @@ function acknowledgeAll() {
 }
 .sos-ack-all:hover { background: var(--panel-3); }
 .sos-sound {
-  pointer-events: auto; background: var(--btn); border: 1px solid var(--btn); color: var(--on-btn); border-radius: 8px;
+  pointer-events: auto; background: var(--btn-alt); border: 1px solid var(--btn-alt); color: var(--on-btn-alt); border-radius: 8px;
   padding: 6px 12px; font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit;
 }
-.sos-sound:hover { background: var(--btn-hover); border-color: var(--btn-hover); }
+.sos-sound:hover { background: var(--btn-alt-hover); border-color: var(--btn-alt-hover); }
 
 /* kartu alarm (baris): bingkai merah untuk SOS; peringatan non-SOS memakai garis netral tipis tanpa bingkai warna */
 .sos-card {
@@ -195,7 +195,9 @@ function acknowledgeAll() {
   font-size: 11px; font-weight: 800; flex-shrink: 0; background: var(--red); color: #fff;
   border-radius: 999px; padding: 5px 8px; line-height: 1;
 }
-.sos-card.warn .sos-icon { background: var(--accent); color: var(--on-btn); border-radius: 6px; }
+/* Kartu "tidak terdengar"/"baterai rendah" = peringatan, ikon oranye-amber (bukan oranye-trail --accent,
+   dan bukan merah SOS). SOS asli di kartu non-.warn tetap merah. */
+.sos-card.warn .sos-icon { background: var(--amber); color: var(--on-amber); border-radius: 6px; }
 .sos-text { display: flex; flex-direction: column; font-size: 12px; line-height: 1.35; flex: 1; min-width: 0; color: var(--text-2); }
 .sos-text strong { font-size: 13px; color: var(--text); }
 .sos-text span { text-transform: none; }

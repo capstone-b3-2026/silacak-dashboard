@@ -47,6 +47,8 @@ Dokumen ini hanya membahas bagian perangkat lunak (dashboard, backend, basis dat
 - Diagnostik tautan per sesi aktif: PDR, latensi, status GPS, jarak ke base, status node basi, dan packet log.
 - Grafik RSSI terhadap jarak ke base untuk paket langsung (0 hop), dengan estimasi eksponen redaman lintasan n dan simpangan baku shadowing sigma.
 - Halaman Setup: unggah DEM GeoTIFF, tentukan posisi base dan jalur, jalankan perencana penempatan relay (pencarian optimal berbasis redaman difraksi pada DEM), geser posisi relay secara manual, dan ekspor rencana ke GPX.
+- Jarak jalur pendakian: jarak horizontal (great-circle Haversine, radius 6371008,8 m konsisten dengan `geo_dist_m`) dihitung instan di peramban begitu base dan minimal dua titik trail ada, lengkap dengan rincian per-segmen. Angka profil 3D (naik-turun sepanjang jalur dari DEM) ditambahkan sebagai angka sekunder setelah DEM siap; segmen di luar cakupan DEM ditandai "sebagian jalur di luar cakupan DEM" (warna amber) dan tidak mengarang elevasi.
+- Panel "Mode developer / parameter hardware" di Setup, hanya tampil saat Mode lanjutan menyala. Mengelompokkan parameter radio/planner dan konfigurasi per-perangkat dengan tooltip penjelas tiap parameter (fungsi, efek naik-turun, dan catatan kecocokan dengan firmware yang di-flash). Operator harian (Mode lanjutan mati) tidak melihat panel ini.
 - Ekspor jejak sesi ke GPX.
 - Manajemen perangkat dan antrean konfigurasi (SF, interval lapor, daya) yang dikirim bridge ke port serial.
 
@@ -205,7 +207,7 @@ Vite berjalan di http://localhost:5173 dan meneruskan `/api` ke http://localhost
 6. Rencana relay dihitung setelah base dan minimal dua titik jalur ada. Bila base langsung menjangkau seluruh jalur, dashboard menyatakan relay tidak diperlukan. Bila perencana macet, pesan alasannya ditampilkan. Selama panel Setup terbuka, penanda relay dapat digeser di peta dan redaman tiap tautan dihitung ulang dari DEM dengan model yang sama dengan perencana.
 7. Rencana relay dapat diekspor ke GPX.
 
-Catatan: frekuensi bawaan perencana adalah 915 MHz. Samakan dengan kanal aktual E220 (rancangan awal memakai 923 MHz).
+Catatan: frekuensi bawaan perencana adalah 922 MHz, mengikuti pita legal Indonesia 920 sampai 923 MHz (AS923, Permenkominfo 1/2019, sesuai C-251). Nilai 915 MHz sebelumnya adalah pita Amerika Serikat dan tidak patuh. Angka ini hanya parameter model perencana (memengaruhi FSPL dan radius Fresnel), bukan nilai yang dikirim ke alat. Firmware memakai `LORA_CHANNEL 70`; frekuensi MHz aktualnya tercetak di Serial saat boot dan belum dikonfirmasi sama persis dengan 922 MHz. Samakan kanal semua node atau mereka tidak saling mendengar.
 
 **Menyiapkan berkas DEM.**
 
@@ -289,7 +291,7 @@ tautan layak  = L_medan <= redaman medan maks  DAN  margin fading >= margin fadi
 
 | Parameter | Arti | Catatan |
 |---|---|---|
-| Frekuensi (MHz) | FSPL dan radius Fresnel | 915 dan 923 MHz hanya beda sekitar 0,4 persen. Samakan dengan kanal E220. |
+| Frekuensi (MHz) | FSPL dan radius Fresnel | Bawaan 922 MHz (pita legal Indonesia 920 sampai 923 MHz, AS923, Permenkominfo 1/2019). Selisih terhadap 915 MHz hanya sekitar 0,4 persen pada perhitungan lintasan. Samakan dengan kanal aktual E220. |
 | Antena pendaki / relay (m) | Tinggi antena | Tiang relay lebih tinggi mengurangi jumlah relay. |
 | Hop maks (km) | Jarak maksimum satu tautan | Bawaan 2 km lebih longgar dari target C-251 (1 km LOS, 300 m NLOS). |
 | Redaman medan maks (dB) | Batas kepercayaan redaman difraksi | Bawaan 6 dB. Menaikkannya menghemat relay tetapi mempercayai model di medan yang makin terhalang. |

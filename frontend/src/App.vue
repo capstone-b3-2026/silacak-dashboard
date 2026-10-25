@@ -4,7 +4,7 @@
     <header class="topbar floating" role="banner">
       <div class="brand">
         <span class="brand-logo" aria-hidden="true">
-          <svg viewBox="0 0 48 44"><path d="M3 38 17 14l7 11 5-8 16 21z" /><path d="M17 14l-3.2 5.4M29 17l2.4 4" /><circle cx="36" cy="9" r="3.2" /></svg>
+          <img :src="logoSrc" alt="" />
         </span>
         <div class="brand-t"><strong>SiLacak</strong><span>Pemantauan pendakian</span></div>
       </div>
@@ -32,7 +32,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import WorkspacePanel from "./components/WorkspacePanel.vue";
 import MapView from "./components/MapView.vue";
 import MonitoringPanel from "./components/MonitoringPanel.vue";
@@ -53,6 +53,10 @@ const theme = ref("dark");
 function toggleTheme() {
   theme.value = theme.value === "dark" ? "light" : "dark";
 }
+
+const logoSrc = computed(() =>
+  `${import.meta.env.BASE_URL}${theme.value === "dark" ? "logo-dark.png" : "logo-light.png"}`
+);
 
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
@@ -111,12 +115,18 @@ useLiveStream((message) => {
    PALET WARNA SiLacak (Forest + Warm Cream + Golden Orange)
    Satu-satunya sumber warna antarmuka. Komponen lain memakai variabel ini,
    jadi cukup diubah di sini.
-   Catatan nama variabel (nama lama dipertahankan agar komponen lain tidak perlu diubah):
-   --blue     = hijau brand (isian tombol segmen peta, dll.)
-   --blue-fg  = hijau brand untuk teks/ikon/garis di atas permukaan
+   Makna warna semantik (lihat .kiro/steering/conventions.md, jangan dilanggar):
+   --blue     = PENDAKI (marker). Biru, bukan hijau.
+   --blue-fg  = biru terang untuk teks/ikon/garis di atas permukaan
+   --green    = link kuat + base. Hijau sage.
+   --amber    = link marginal + peringatan. Oranye sungguhan (BUKAN sama dengan --muted).
+   --violet   = relay. Ungu (dipisah dari --accent trail supaya relay != trail).
+   --accent   = trail / lokasi / tombol utama (Golden Orange).
+   --muted    = menunggu data / placeholder (abu netral, bukan peringatan).
+   --red      = SOS / bahaya nyata SAJA.
    --btn      = tombol aksi utama (Golden Orange). Mau ganti warna tombol? Ubah
                 --btn, --btn-hover, --on-btn di bawah.
-   --marker   = penanda pendaki normal
+   --marker   = penanda pendaki normal (biru, mengikuti --blue)
 ══════════════════════════════════════ */
 :root {
   /* DARK MODE */
@@ -130,22 +140,26 @@ useLiveStream((message) => {
   --text: #f5f2e8;        /* Warm Ivory */
   --text-2: #b8c6b9;      /* Sage Gray */
   --muted: #a5ada5;       /* Stone Gray: menunggu / placeholder */
-  --blue: #2f7652;        /* Forest Green (isian) */
-  --blue-fg: #75b58a;     /* hijau terang untuk teks/ikon di tema gelap */
-  --blue-hover: #39845e;  /* Fresh Forest */
-  --blue-glow: rgba(117, 181, 138, 0.16);
-  --teal: #75b58a;
-  --green: #75b58a;       /* Soft Sage: aman / terhubung */
-  --green-bg: rgba(117, 181, 138, 0.16);
+  --blue: #4d8fd6;        /* Sky Blue: PENDAKI (marker) */
+  --blue-fg: #7fb0e6;     /* biru terang untuk teks/ikon di tema gelap */
+  --blue-hover: #5f9fe0;  /* biru hover */
+  --blue-glow: rgba(77, 143, 214, 0.16);
+  --teal: #8cc9a0;
+  --green: #8cc9a0;       /* hijau sage: link kuat + base */
+  --green-bg: rgba(140, 201, 160, 0.16);
   --on-green: #101f19;    /* teks di atas isian hijau aman */
-  --amber: #a5ada5;       /* Stone Gray: menunggu */
-  --accent: #f5a623;      /* Golden Orange: lokasi / jalur / relay */
+  --amber: #e0953a;       /* Orange: link marginal + peringatan (BEDA dari --muted) */
+  --amber-glow: rgba(224, 149, 58, 0.16);
+  --accent: #f5a623;      /* Golden Orange: lokasi / jalur / tombol (relay pindah ke --violet) */
   --accent-glow: rgba(245, 166, 35, 0.16);
-  --btn: #f5a623;         /* tombol utama */
-  --btn-hover: #ffb63f;
-  --on-btn: #101f19;      /* teks di atas tombol */
-  --marker: #75b58a;      /* penanda pendaki normal */
-  --on-marker: #101f19;
+  --violet: #9d84e0;      /* Violet: relay */
+  --violet-glow: rgba(157, 132, 224, 0.18);
+  --btn: #178650;         /* tombol utama: hijau tua */
+  --btn-hover: #1d9a5e;
+  --on-btn: #ffffff;      /* teks di atas tombol */
+  --btn-glow: rgba(23, 134, 80, 0.35);   /* teks di atas tombol */
+  --marker: #4d8fd6;      /* penanda pendaki normal (biru) */
+  --on-marker: #fff;
   --red: #d95b49;         /* Terracotta Red: bahaya / SOS / putus */
   --red-bg: rgba(217, 91, 73, 0.13);
   --red-bg-2: rgba(217, 91, 73, 0.2);
@@ -171,25 +185,29 @@ useLiveStream((message) => {
   --panel-3: #f9f6eb;     /* kotak dalam kartu */
   --line: #e4dfd2;        /* Soft Stone: border */
   --line-2: #e4dfd2;
-  --line-3: #cfc9b8;
+  --line-3: #b8b19c;      /* border input (lebih gelap agar terlihat; kontras kasar) */
   --text: #18382b;        /* Deep Forest */
-  --text-2: #667568;      /* Muted Olive Gray */
-  --muted: #9a9688;       /* Muted Stone: menunggu / placeholder */
-  --blue: #214f38;        /* Forest Green */
-  --blue-fg: #214f38;
-  --blue-hover: #183d2c;  /* Deep Forest Green */
-  --blue-glow: rgba(33, 79, 56, 0.1);
-  --teal: #4f8065;
-  --green: #4f8065;       /* Sage Green: aman / terhubung */
-  --green-bg: rgba(79, 128, 101, 0.16);
+  --text-2: #4a5a4c;      /* Olive Gray gelap: label/hint (target >= 4.5:1, kasar) */
+  --muted: #6e6a5c;       /* Stone gelap: teks menunggu/placeholder (kontras kasar) */
+  --blue: #2f6fb0;        /* Sky Blue (gelap untuk krem): PENDAKI */
+  --blue-fg: #2f6fb0;
+  --blue-hover: #255c94;  /* biru hover */
+  --blue-glow: rgba(47, 111, 176, 0.1);
+  --teal: #3f7a57;
+  --green: #3f7a57;       /* Sage Green (lebih gelap, kontras di krem): link kuat + base */
+  --green-bg: rgba(63, 122, 87, 0.16);
   --on-green: #fffefa;
-  --amber: #9a9688;       /* Muted Stone: menunggu */
-  --accent: #e99a26;      /* Golden Orange: lokasi / jalur / relay */
+  --amber: #c07a1e;       /* Orange gelap: link marginal + peringatan */
+  --amber-glow: rgba(192, 122, 30, 0.16);
+  --accent: #e99a26;      /* Golden Orange: lokasi / jalur / tombol (relay pindah ke --violet) */
   --accent-glow: rgba(233, 154, 38, 0.16);
-  --btn: #e99a26;         /* tombol utama */
-  --btn-hover: #d98a18;
-  --on-btn: #18382b;
-  --marker: #214f38;      /* penanda pendaki normal */
+  --violet: #6f54c0;      /* Violet: relay */
+  --violet-glow: rgba(111, 84, 192, 0.16);
+  --btn: #0c6038;         /* tombol utama: hijau tua */
+  --btn-hover: #094d2d;
+  --on-btn: #f7f4d5;
+  --btn-glow: rgba(12, 96, 56, 0.14);
+  --marker: #2f6fb0;      /* penanda pendaki normal (biru) */
   --on-marker: #fffefa;
   --red: #c94f3d;         /* Terracotta Red: bahaya / SOS / putus */
   --red-bg: rgba(201, 79, 61, 0.11);
@@ -344,6 +362,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .bdg { font-size: 12px; font-weight: 700; padding: 2px 10px; border-radius: 6px; border: 1px solid transparent; white-space: nowrap; }
 .bdg.ok { background: var(--green); color: var(--on-green); border-color: var(--green); }
 .bdg.bad { background: var(--red); color: #fff; border-color: var(--red); }
+/* warn = PERINGATAN (perlu tindakan), oranye. BUKAN merah: merah = SOS saja. */
+.bdg.warn { background: var(--amber); color: #fff; border-color: var(--amber); }
+/* neutral = KETIDAKPASTIAN (mis. tanpa fix GPS), abu netral. Bukan bahaya, bukan peringatan. */
+.bdg.neutral { background: transparent; color: var(--muted); border-color: var(--muted); }
 
 /* ── daftar tautan / log / SOS ── */
 .evl, .sosl, .lnkl { display: flex; flex-direction: column; gap: 0; }
@@ -359,9 +381,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 /* ── topbar ── */
 .topbar { top: var(--edge); left: var(--edge); right: var(--edge); height: 56px; z-index: 25; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand-logo { width: 44px; height: 40px; display: grid; place-items: center; color: var(--text); }
-.brand-logo svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.brand-logo svg circle { stroke: var(--accent); }
+.brand-logo { width: 44px; height: 40px; display: grid; place-items: center; }
+.brand-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .brand-t { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-t strong { font-family: var(--font-head); font-size: 18px; font-weight: 800; color: var(--text); }
 .brand-t span { font-size: 11.5px; color: var(--text-2); font-weight: 500; }
@@ -383,9 +404,12 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .mbtnn .seg { color: var(--muted); }
 .mbtnn .seg.on { color: var(--text); font-weight: 700; }
 .mbtnn .seg-sl { color: var(--line-3); }
-.app .map-ctl .mbtnn.pri { background: var(--blue); color: #fff; }
-.app .map-ctl .mbtnn.pri:hover:not(:disabled) { background: var(--blue-hover); color: #fff; }
-.app .map-ctl .mbtnn.on3d { background: var(--blue-glow); color: var(--blue-fg) !important; box-shadow: inset 0 0 0 1px var(--blue-fg); }
+/* Tombol toolbar peta = warna brand hijau (UI chrome), BUKAN --blue.
+   --blue khusus penanda pendaki di peta (disiplin warna semantik). */
+.app .map-ctl .mbtnn.pri { background: var(--green); color: var(--on-green); }
+.app .map-ctl .mbtnn.pri:hover:not(:disabled) { background: var(--green); filter: brightness(1.08); color: var(--on-green); }
+.app .map-ctl .mbtnn.on3d { background: var(--green); color: var(--on-green) !important; box-shadow: none; }
+.app .map-ctl .mbtnn.on3d:hover:not(:disabled) { background: var(--green); filter: brightness(1.08); color: var(--on-green) !important; }
 
 .conn-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
 .conn-dot.live { background: var(--green); }
@@ -403,7 +427,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 /* penanda: pendaki = hijau, SOS = merah, base = hijau sage, relay = oranye */
 .mk-site { min-width: 26px; height: 26px; padding: 0 5px; border-radius: 6px; display: grid; place-items: center; color: #fff; font-size: 13px; font-weight: 700; border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45); cursor: default; user-select: none; }
 .mk-site.base { background: var(--green); color: var(--on-green); }
-.mk-site.relay { background: var(--accent); color: var(--on-btn); }
+.mk-site.relay { background: var(--violet); color: #fff; }
 .mk-site.relay.broken { opacity: 0.6; outline: 2px dashed var(--text); outline-offset: 2px; } /* bukan merah: merah = SOS */
 .mk-site.drag { cursor: grab; box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.6); }
 .mk-site.drag:active { cursor: grabbing; }

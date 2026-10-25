@@ -52,6 +52,52 @@ export function buildRoute({ hiker, routePath, devices = [], relays = [], base =
   };
 }
 
+// Radius Bumi rata-rata (meter). SAMA dengan backend/app/services/geo.py dan SQL geo_dist_m,
+// supaya jarak di layar cocok dengan yang dihitung backend. JANGAN pakai 6371.0 km (milik terrain_planner, sedikit beda).
+const EARTH_RADIUS_M = 6371008.8;
+
+/**
+ * Jarak great-circle (Haversine) antara dua titik dalam meter.
+ * KONVENSI lat/lon (bug #1 proyek): tiap titik adalah [lat, lon] (lintang dulu), sama dengan site.trail.
+ * @param {[number, number]} a titik [lat, lon]
+ * @param {[number, number]} b titik [lat, lon]
+ * @returns {number} jarak dalam meter (nilai sungguhan, 0 bila dua titik sama)
+ */
+export function haversineM([lat1, lon1], [lat2, lon2]) {
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return 2 * EARTH_RADIUS_M * Math.asin(Math.min(1, Math.sqrt(s)));
+}
+
+/**
+ * Jarak horizontal trail per segmen: base -> titik1 -> titik2 -> ...
+ * KONVENSI lat/lon (bug #1 proyek): base = {lat, lon} | null; points = array [lat, lon] (lintang dulu, sama dengan site.trail).
+ * Bila base null, mulai dari titik trail pertama. 0 atau 1 titik (tanpa base) -> total 0 dan tidak ada segmen.
+ * @param {{lat:number, lon:number}|null} base titik base station
+ * @param {Array<[number, number]>} points titik trail [lat, lon]
+ * @returns {{ totalM:number, segments:Array<{fromLabel:string, toLabel:string, m:number}> }}
+ */
+export function trailSegments(base, points = []) {
+  const baseOk = !!base && typeof base.lat === "number" && typeof base.lon === "number";
+  // Simpul berurutan + label operator: base lalu titik1, titik2, ...
+  const nodes = [];
+  if (baseOk) nodes.push({ label: "Base", point: [base.lat, base.lon] });
+  points.forEach((p, i) => nodes.push({ label: `Titik ${i + 1}`, point: p }));
+
+  const segments = [];
+  let totalM = 0;
+  for (let i = 1; i < nodes.length; i++) {
+    const m = haversineM(nodes[i - 1].point, nodes[i].point);
+    totalM += m;
+    segments.push({ fromLabel: nodes[i - 1].label, toLabel: nodes[i].label, m });
+  }
+  return { totalM, segments };
+}
+
 /** GeoJSON untuk MapLibre: satu garis rute + titik sorot di tiap relay yang dilewati. */
 export function routeFeatureCollection(route) {
   const features = [];

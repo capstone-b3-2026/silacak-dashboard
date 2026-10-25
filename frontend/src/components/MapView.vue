@@ -12,7 +12,7 @@
     <button class="mbtnn fit-btn pri" @click="fitAll" title="Tampilkan semua pendaki di layar" aria-label="Tampilkan semua pendaki">Semua</button>
     <div class="msep"></div>
     <button
-      class="mbtnn fit-btn" :class="{ on3d: is3d }" :aria-pressed="is3d" :disabled="!siteStore.ready" @click="toggle3d"
+      class="mbtnn fit-btn" :aria-pressed="is3d" :disabled="!siteStore.ready" @click="toggle3d"
       :title="siteStore.ready ? 'Ganti tampilan 2D / 3D' : 'Upload DEM di Setup (Mode lanjutan) untuk mengaktifkan 3D'"
     >
       <span class="seg" :class="{ on: !is3d }">2D</span><span class="seg-sl">/</span><span class="seg" :class="{ on: is3d }">3D</span>
@@ -353,9 +353,9 @@ function syncDem() {
       source: "dem",
       paint: {
         "hillshade-exaggeration": 0.55,
-        "hillshade-shadow-color": "#101f19",
+        "hillshade-shadow-color": "#0a3a22",
         "hillshade-highlight-color": "#ffffff",
-        "hillshade-accent-color": "#172b22",
+        "hillshade-accent-color": "#0c4a2c",
       },
     },
     map.getLayer("tracks") ? "tracks" : undefined
@@ -370,7 +370,8 @@ function syncDem() {
   });
   map.addLayer({
     id: "dem-bounds", type: "line", source: "dem-bounds",
-    paint: { "line-color": "#9a9688", "line-width": 1.6, "line-dasharray": [3, 2] },
+    // Batas DEM = kuning (konvensi warna; sama dengan trail putus-putus). MapLibre paint butuh hex literal.
+    paint: { "line-color": "#e0b050", "line-width": 1.6, "line-dasharray": [3, 2] },
   });
   applyBasemap();
   map.fitBounds([[w, s], [e, n]], { padding: 40, duration: firstFit ? 0 : 800 });
@@ -395,7 +396,9 @@ function siteGeo() {
       const loss = r.loss_db ?? (r.margin_m < 3 ? 6 : 0); // rencana lama hanya punya margin
       f.push({
         type: "Feature",
-        properties: { kind: "link", color: r.link_ok === false ? "#c94f3d" : (r.fade_margin_db != null ? r.fade_margin_db < (st.params?.fade_margin_db ?? 10) : loss > 3) ? "#9a9688" : "#4f8065" },
+        // Warna link: tak-layak = merah literal #c94f3d (pengecualian terdokumentasi, bukan token SOS),
+        // marginal = oranye #e8872f (~ --amber), kuat = hijau #3f8f5f. MapLibre paint butuh hex literal.
+        properties: { kind: "link", color: r.link_ok === false ? "#c94f3d" : (r.fade_margin_db != null ? r.fade_margin_db < (st.params?.fade_margin_db ?? 10) : loss > 3) ? "#e8872f" : "#3f8f5f" },
         geometry: { type: "LineString", coordinates: [nodes[r.parent ?? i], nodes[i + 1]] },
       });
     });
@@ -467,7 +470,7 @@ onMounted(() => {
     map.addLayer({
       id: "site-trail", type: "line", source: "site", filter: ["==", ["get", "kind"], "trail"],
       layout: { "line-join": "round", "line-cap": "round" },
-      paint: { "line-color": "#e99a26", "line-width": 2.5, "line-dasharray": [2, 1.5] },
+      paint: { "line-color": "#e0a800", "line-width": 2.5, "line-dasharray": [2, 1.5] },
     });
     map.addLayer({
       id: "site-link", type: "line", source: "site", filter: ["==", ["get", "kind"], "link"],
@@ -476,7 +479,7 @@ onMounted(() => {
     });
     map.addLayer({
       id: "site-pts", type: "circle", source: "site", filter: ["==", ["get", "kind"], "pt"],
-      paint: { "circle-radius": 3.5, "circle-color": "#e99a26", "circle-stroke-color": "#fff", "circle-stroke-width": 1 },
+      paint: { "circle-radius": 3.5, "circle-color": "#e0a800", "circle-stroke-color": "#fff", "circle-stroke-width": 1 },
     });
     // rute paket: garis putus-putus terang berbingkai gelap (terbaca di tema gelap maupun terang) + cincin di relay yang dilewati
     map.addSource("route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -488,11 +491,11 @@ onMounted(() => {
     map.addLayer({
       id: "route-line", type: "line", source: "route", filter: ["==", ["get", "kind"], "route"],
       layout: { "line-join": "round", "line-cap": "round" },
-      paint: { "line-color": "#214f38", "line-width": 2.5, "line-dasharray": [2, 1.5] },
+      paint: { "line-color": "#0c6038", "line-width": 2.5, "line-dasharray": [2, 1.5] },
     });
     map.addLayer({
       id: "route-hops", type: "circle", source: "route", filter: ["==", ["get", "kind"], "hop"],
-      paint: { "circle-radius": 13, "circle-opacity": 0, "circle-stroke-color": "#214f38", "circle-stroke-width": 2.5 },
+      paint: { "circle-radius": 13, "circle-opacity": 0, "circle-stroke-color": "#0c6038", "circle-stroke-width": 2.5 },
     });
     mapReady = true;
     if (!navigator.onLine && basemap.value === "osm") basemap.value = "topo"; // browser sudah tahu sedang offline

@@ -4,7 +4,7 @@
       <div class="tl">
         <svg class="ic" viewBox="0 0 24 24"><path d="M3 20l6-11 4 6 3-4 5 9z" /></svg>
         Sesi pendakian
-        <span v-if="store.unregistered.length" class="bdg bad" style="margin-left: 6px">{{ store.unregistered.length }} belum check-in</span>
+        <span v-if="store.unregistered.length" class="bdg warn" style="margin-left: 6px">{{ store.unregistered.length }} belum check-in</span>
       </div>
       <div class="sv"><svg class="chev" :class="{ open }" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>{{ store.active.length }} aktif</div>
     </div>
@@ -32,7 +32,7 @@
           <div class="sess-top">
             <span class="sess-ic" :class="{ warn: s.auto_opened }" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg></span>
             <strong>{{ s.full_name || "Belum check-in" }}</strong>
-            <span class="bdg" :class="s.auto_opened ? 'bad' : 'ok'">{{ s.hiker_code }}</span>
+            <span class="bdg" :class="s.auto_opened ? 'warn' : 'ok'">{{ s.hiker_code }}</span>
           </div>
           <div class="emeta">
             <template v-if="s.trail_name">{{ s.trail_name }} · </template>
@@ -143,23 +143,24 @@ async function doCheckOut(s) {
 .ph-toggle .sv { display: inline-flex; align-items: center; gap: 4px; }
 .chev { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 2.6; stroke-linecap: round; stroke-linejoin: round; transition: transform 0.15s; }
 .chev.open { transform: rotate(90deg); }
-.sess-warn { border: 1px solid var(--red); background: var(--red-bg); border-radius: 10px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+/* "belum check-in" = peringatan perlu tindakan, bukan bahaya SOS -> amber (bukan merah). */
+.sess-warn { border: 1px solid var(--amber); background: var(--amber-glow); border-radius: 10px; padding: 8px 10px; font-size: 13px; margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
 .lnk-btn { background: none; border: none; color: var(--blue-fg); cursor: pointer; font-size: 13px; text-decoration: underline; }
 .sess-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
 .sess-tabs button { height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text-2); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
-.sess-tabs button.on { color: var(--on-btn); border-color: var(--btn); background: var(--btn); }
+.sess-tabs button.on { color: var(--on-btn-alt); border-color: var(--btn-alt); background: var(--btn-alt); }
 .sess-list { display: flex; flex-direction: column; gap: 0; max-height: 240px; overflow-y: auto; }
 .sess { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 2px; }
 .sess:first-child { border-top: 0; }
 .sess-top { display: flex; align-items: center; gap: 8px; font-size: 14px; margin-bottom: 4px; }
 .sess-top strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess-ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex-shrink: 0; background: var(--green-bg); color: var(--green); }
-.sess-ic.warn { background: var(--red-bg); color: var(--red); }
+.sess-ic.warn { background: var(--amber-glow); color: var(--amber); }
 .sess-ic svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .sess-act { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
 .mini { font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--line-3); background: transparent; color: var(--text-2); cursor: pointer; text-decoration: none; font-family: inherit; }
 .mini:hover { color: var(--text); background: var(--panel-2); }
-.mini.warn { color: var(--red); border-color: var(--red); }
+.mini.warn { color: var(--amber); border-color: var(--amber); }
 .sess-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .sess-ft { font-size: 13px; font-weight: 700; color: var(--text); }
 .sess-form input { height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text); padding: 0 10px; font-size: 14px; font-family: inherit; }
