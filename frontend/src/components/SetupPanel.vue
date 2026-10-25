@@ -486,7 +486,7 @@ label { display: flex; flex-direction: column; gap: 5px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn.primary { background: var(--btn); border-color: var(--btn); color: var(--on-btn); }
 .btn.primary:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--btn-hover); }
-.btn.active { background: var(--btn); border-color: var(--btn); color: var(--on-btn); }
+.btn.active { background: var(--btn-alt); border-color: var(--btn-alt); color: var(--on-btn-alt); }
 .btn.danger { color: var(--red); }
 .btn.sm { height: 32px; padding: 0 11px; font-size: 14px; }
 

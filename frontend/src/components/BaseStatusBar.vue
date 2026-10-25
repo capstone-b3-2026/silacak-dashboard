@@ -141,8 +141,8 @@ async function choose(port) {
 .bb-status.warn .bb-dot { background: var(--amber); }
 /* Kegagalan koneksi base (terputus/USB/tak terjangkau) = PERINGATAN operasional, bukan SOS.
    Pakai amber, bukan merah (merah = SOS saja). Tetap menonjol dengan latar penuh + ikon. */
-.bb-status.bad { background: var(--amber); color: #fff; padding: 4px 12px; }
-.bb-status.bad .bb-dot { background: #fff; }
+.bb-status.bad { background: var(--amber); color: var(--on-amber); padding: 4px 12px; }
+.bb-status.bad .bb-dot { background: var(--on-amber); }
 .bb-status.off { color: var(--text-2); }
 .bb-icon { display: none; }
 .bb-port { font-weight: 600; opacity: 0.9; font-size: 12px; }
@@ -156,8 +156,8 @@ async function choose(port) {
 .bb-btn:hover:not(:disabled) { background: var(--blue-glow); }
 .bb-btn:disabled { opacity: 0.5; cursor: wait; }
 .bb-btn.attn { background: var(--accent-glow); border-color: var(--accent); }
-.bb-btn.warn { border-color: var(--btn); background: var(--btn); color: var(--on-btn); }
-.bb-btn.warn:hover:not(:disabled) { background: var(--btn-hover); border-color: var(--btn-hover); }
+.bb-btn.warn { border-color: var(--btn-alt); background: var(--btn-alt); color: var(--on-btn-alt); }
+.bb-btn.warn:hover:not(:disabled) { background: var(--btn-alt-hover); border-color: var(--btn-alt-hover); }
 .bb-btn.ok { color: var(--green); border-color: var(--green); }
 .bb-btn.ok:hover:not(:disabled) { background: var(--green-bg); }
 .bb-pop {

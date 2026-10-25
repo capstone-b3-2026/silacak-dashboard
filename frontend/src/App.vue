@@ -4,7 +4,7 @@
     <header class="topbar floating" role="banner">
       <div class="brand">
         <span class="brand-logo" aria-hidden="true">
-          <svg viewBox="0 0 48 44"><path d="M3 38 17 14l7 11 5-8 16 21z" /><path d="M17 14l-3.2 5.4M29 17l2.4 4" /><circle cx="36" cy="9" r="3.2" /></svg>
+          <img :src="logoSrc" alt="" />
         </span>
         <div class="brand-t"><strong>SiLacak</strong><span>Pemantauan pendakian</span></div>
       </div>
@@ -32,7 +32,7 @@
 </template>
 
 <script setup>
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import WorkspacePanel from "./components/WorkspacePanel.vue";
 import MapView from "./components/MapView.vue";
 import MonitoringPanel from "./components/MonitoringPanel.vue";
@@ -53,6 +53,10 @@ const theme = ref("dark");
 function toggleTheme() {
   theme.value = theme.value === "dark" ? "light" : "dark";
 }
+
+const logoSrc = computed(() =>
+  `${import.meta.env.BASE_URL}${theme.value === "dark" ? "logo-dark.png" : "logo-light.png"}`
+);
 
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
@@ -140,9 +144,9 @@ useLiveStream((message) => {
   --blue-fg: #7fb0e6;     /* biru terang untuk teks/ikon di tema gelap */
   --blue-hover: #5f9fe0;  /* biru hover */
   --blue-glow: rgba(77, 143, 214, 0.16);
-  --teal: #75b58a;
-  --green: #75b58a;       /* Soft Sage: link kuat + base */
-  --green-bg: rgba(117, 181, 138, 0.16);
+  --teal: #8cc9a0;
+  --green: #8cc9a0;       /* hijau sage: link kuat + base */
+  --green-bg: rgba(140, 201, 160, 0.16);
   --on-green: #101f19;    /* teks di atas isian hijau aman */
   --amber: #e0953a;       /* Orange: link marginal + peringatan (BEDA dari --muted) */
   --amber-glow: rgba(224, 149, 58, 0.16);
@@ -150,9 +154,10 @@ useLiveStream((message) => {
   --accent-glow: rgba(245, 166, 35, 0.16);
   --violet: #9d84e0;      /* Violet: relay */
   --violet-glow: rgba(157, 132, 224, 0.18);
-  --btn: #f5a623;         /* tombol utama */
-  --btn-hover: #ffb63f;
-  --on-btn: #101f19;      /* teks di atas tombol */
+  --btn: #178650;         /* tombol utama: hijau tua */
+  --btn-hover: #1d9a5e;
+  --on-btn: #ffffff;      /* teks di atas tombol */
+  --btn-glow: rgba(23, 134, 80, 0.35);   /* teks di atas tombol */
   --marker: #4d8fd6;      /* penanda pendaki normal (biru) */
   --on-marker: #fff;
   --red: #d95b49;         /* Terracotta Red: bahaya / SOS / putus */
@@ -198,9 +203,10 @@ useLiveStream((message) => {
   --accent-glow: rgba(233, 154, 38, 0.16);
   --violet: #6f54c0;      /* Violet: relay */
   --violet-glow: rgba(111, 84, 192, 0.16);
-  --btn: #e99a26;         /* tombol utama */
-  --btn-hover: #d98a18;
-  --on-btn: #18382b;
+  --btn: #0c6038;         /* tombol utama: hijau tua */
+  --btn-hover: #094d2d;
+  --on-btn: #f7f4d5;
+  --btn-glow: rgba(12, 96, 56, 0.14);
   --marker: #2f6fb0;      /* penanda pendaki normal (biru) */
   --on-marker: #fffefa;
   --red: #c94f3d;         /* Terracotta Red: bahaya / SOS / putus */
@@ -375,9 +381,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 /* ── topbar ── */
 .topbar { top: var(--edge); left: var(--edge); right: var(--edge); height: 56px; z-index: 25; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 14px; }
 .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.brand-logo { width: 44px; height: 40px; display: grid; place-items: center; color: var(--text); }
-.brand-logo svg { width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.brand-logo svg circle { stroke: var(--accent); }
+.brand-logo { width: 44px; height: 40px; display: grid; place-items: center; }
+.brand-logo img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .brand-t { display: flex; flex-direction: column; line-height: 1.15; }
 .brand-t strong { font-family: var(--font-head); font-size: 18px; font-weight: 800; color: var(--text); }
 .brand-t span { font-size: 11.5px; color: var(--text-2); font-weight: 500; }
@@ -403,7 +408,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
    --blue khusus penanda pendaki di peta (disiplin warna semantik). */
 .app .map-ctl .mbtnn.pri { background: var(--green); color: var(--on-green); }
 .app .map-ctl .mbtnn.pri:hover:not(:disabled) { background: var(--green); filter: brightness(1.08); color: var(--on-green); }
-.app .map-ctl .mbtnn.on3d { background: var(--green-bg); color: var(--green) !important; box-shadow: inset 0 0 0 1px var(--green); }
+.app .map-ctl .mbtnn.on3d { background: var(--green); color: var(--on-green) !important; box-shadow: none; }
+.app .map-ctl .mbtnn.on3d:hover:not(:disabled) { background: var(--green); filter: brightness(1.08); color: var(--on-green) !important; }
 
 .conn-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 6px; }
 .conn-dot.live { background: var(--green); }

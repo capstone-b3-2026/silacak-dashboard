@@ -148,7 +148,7 @@ async function doCheckOut(s) {
 .lnk-btn { background: none; border: none; color: var(--blue-fg); cursor: pointer; font-size: 13px; text-decoration: underline; }
 .sess-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px; }
 .sess-tabs button { height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text-2); font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit; }
-.sess-tabs button.on { color: var(--on-btn); border-color: var(--btn); background: var(--btn); }
+.sess-tabs button.on { color: var(--on-btn-alt); border-color: var(--btn-alt); background: var(--btn-alt); }
 .sess-list { display: flex; flex-direction: column; gap: 0; max-height: 240px; overflow-y: auto; }
 .sess { border: 0; border-top: 1px solid var(--line); border-radius: 0; background: transparent; padding: 10px 2px; }
 .sess:first-child { border-top: 0; }
