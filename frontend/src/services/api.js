@@ -197,3 +197,8 @@ export async function fetchDataInfo() {
 export async function openDataFolder() {
   return jsonOrThrow(await fetch(`${BASE_URL}/export/open-data-folder`, { method: "POST" }));
 }
+
+// ── Baterai relay (baris CSV_RELAY_BATTERY dari base, dibaca backend ingest tertanam) ──
+export async function fetchRelayStatus() {
+  return jsonOrThrow(await fetch(`${BASE_URL}/relays/status`));
+}

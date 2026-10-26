@@ -255,6 +255,44 @@ CREATE TRIGGER trg_notify_position
 """
 
 
+# Data pendukung dari base (bukan posisi pendaki): baterai relay, RSSI per hop, riwayat reboot pendaki.
+RELAY_STATUS_SQL = """
+CREATE TABLE IF NOT EXISTS relay_status (
+    id             BIGSERIAL PRIMARY KEY,
+    relay_id       INTEGER NOT NULL,              -- RELAY_ID di firmware (mis. 101)
+    boot_id        BIGINT,
+    sequence       BIGINT,
+    battery_pct    SMALLINT,                      -- NULL = sensor tidak OK (lihat gauge_state)
+    volts          DOUBLE PRECISION,
+    gauge_state    TEXT NOT NULL,                 -- OK | NO_DEVICE | IO_ERROR | INVALID | STALE | WARMING_UP | UNKNOWN
+    sample_age_ms  BIGINT,
+    route_path     TEXT,
+    hop_count      INTEGER,
+    rssi_dbm       INTEGER,
+    received_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_relay_status_relay_time ON relay_status (relay_id, received_at DESC);
+
+CREATE TABLE IF NOT EXISTS link_hops (
+    id           BIGSERIAL PRIMARY KEY,
+    node_id      INTEGER NOT NULL,                -- pendaki
+    boot_id      BIGINT,
+    sequence     BIGINT,
+    hops         JSONB NOT NULL,                  -- [{"relay_id":101,"rssi_dbm":-87}, ...] urutan pendaki -> base
+    received_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_link_hops_node_time ON link_hops (node_id, received_at DESC);
+
+CREATE TABLE IF NOT EXISTS node_boots (
+    id           BIGSERIAL PRIMARY KEY,
+    node_id      INTEGER NOT NULL,
+    boot_id      BIGINT NOT NULL,
+    received_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_node_boots_node_time ON node_boots (node_id, received_at DESC);
+"""
+
+
 async def _try_timescale(conn) -> bool:
     """Opsional: jadikan positions hypertable kalau TimescaleDB tersedia. Tidak pernah fatal."""
     try:
@@ -275,4 +313,5 @@ async def ensure_schema(conn) -> bool:
     await conn.execute(BASE_SQL)
     await conn.execute(MIGRATE_GEOGRAPHY_SQL)
     await conn.execute(SCHEMA_SQL)
+    await conn.execute(RELAY_STATUS_SQL)
     return await _try_timescale(conn)

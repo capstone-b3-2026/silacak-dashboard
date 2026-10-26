@@ -63,6 +63,76 @@ def parse_csv_timing(raw: str) -> dict[str, int] | None:
     return {"sequence": seq, "node_id": node, "rtt_ms": rtt}
 
 
+# ── Baris pendukung dari base_real.cpp (bukan CSV_DATA) ─────────────────────────────────────────
+# CSV_RELAY_BATTERY,<relay_id>,<boot>,<seq>,<relay_uptime_ms>,<base_rx_ms>,<pct|->,<volt|->,<state>,<umur_sampel_ms|->,<rute>,<hop>,<rssi|->
+#   (formatRelayBattery di include/real_serial.h; dikirim base tiap relay melapor, ~30 dtk)
+RELAY_BATTERY_FIELDS = [
+    "relay_id", "boot_id", "sequence", "relay_uptime_ms", "base_received_ms", "battery_pct",
+    "volts", "gauge_state", "sample_age_ms", "route", "hops", "rssi_dbm",
+]
+GAUGE_STATES = {"OK", "NO_DEVICE", "IO_ERROR", "INVALID", "STALE", "WARMING_UP", "UNKNOWN"}
+
+
+def parse_relay_battery(raw: str) -> dict | None:
+    """`CSV_RELAY_BATTERY,...` -> dict siap simpan, atau None kalau bukan baris itu / rusak.
+    Tanda `,` setelah nama sengaja ikut dicek supaya `CSV_RELAY_BATTERY_STATS,...` tidak ikut terbaca."""
+    if not raw.startswith("CSV_RELAY_BATTERY,"):
+        return None
+    try:
+        parts = next(csv.reader([raw]))
+    except (csv.Error, StopIteration):
+        return None
+    if len(parts) < 13:
+        return None
+    d = dict(zip(RELAY_BATTERY_FIELDS, parts[1:13]))
+    relay_id, boot_id, seq = to_int(d["relay_id"]), to_int(d["boot_id"]), to_int(d["sequence"])
+    if relay_id is None or boot_id is None or seq is None:
+        return None
+    state = d["gauge_state"].strip().upper()
+    if state not in GAUGE_STATES:
+        state = "UNKNOWN"
+    pct, volts = parse_battery(d["battery_pct"]), to_float(d["volts"])
+    if state != "OK" or (volts is not None and not 2.5 <= volts <= 4.5):
+        pct = volts = None  # firmware mencetak "-" kalau sensor tidak OK; jangan simpan angka yang tidak dipercaya
+    return {
+        "relay_id": relay_id, "boot_id": boot_id, "sequence": seq, "battery_pct": pct, "volts": volts,
+        "gauge_state": state, "sample_age_ms": to_int(d["sample_age_ms"]), "route_path": d["route"] or None,
+        "hop_count": to_int(d["hops"]), "rssi_dbm": to_int(d["rssi_dbm"]),
+    }
+
+
+def parse_csv_link(raw: str) -> dict | None:
+    """`CSV_LINK,<node>,<boot>,<seq>[,R<id>:<rssi|->]...` -> {node_id, boot_id, sequence, hops:[{relay_id, rssi_dbm}]}.
+    Paket langsung (tanpa relay) menghasilkan hops kosong. RSSI "-" = tidak diketahui (None)."""
+    if not raw.startswith("CSV_LINK,"):
+        return None
+    parts = raw.split(",")
+    if len(parts) < 4:
+        return None
+    node, boot, seq = to_int(parts[1]), to_int(parts[2]), to_int(parts[3])
+    if node is None or boot is None or seq is None:
+        return None
+    hops = []
+    for tok in parts[4:]:
+        tag, _, rssi = tok.strip().partition(":")
+        rid = to_int(tag[1:]) if tag.startswith("R") else None
+        if rid is None:
+            return None
+        hops.append({"relay_id": rid, "rssi_dbm": to_int(rssi)})
+    return {"node_id": node, "boot_id": boot, "sequence": seq, "hops": hops}
+
+
+def parse_csv_boot(raw: str) -> dict | None:
+    """`CSV_BOOT,<node>,<boot>` -> pendaki reboot (boot ID naik). Dipakai untuk menjelaskan penghitung paket yang di-reset."""
+    if not raw.startswith("CSV_BOOT,"):
+        return None
+    parts = raw.split(",")
+    if len(parts) < 3:
+        return None
+    node, boot = to_int(parts[1]), to_int(parts[2])
+    return None if node is None or boot is None else {"node_id": node, "boot_id": boot}
+
+
 def to_int(v: str) -> int | None:
     try:
         return int(v) if v not in ("", "-") else None
@@ -127,13 +197,9 @@ def parse_battery(value: str) -> float | None:
     return float(x) if 0 <= x <= 100 else None
 
 def parse_sos(value: str) -> bool:
-    v = (value or "").strip().lower()
-    if v in ("1", "true", "yes", "on", "sos"):
-        return True
-    try:
-        return float(v) > 0
-    except ValueError:
-        return False
+    # Kontrak firmware: field ke-20 hanya "0" atau "1" (valid() di real_protocol.h menolak sos > 1).
+    # Sama persis dengan bridge referensi (`== "1"`): nilai lain = bukan SOS, supaya tidak ada alarm palsu.
+    return (value or "").strip() == "1"
 
 def to_record(row: dict[str, str], now: datetime | None = None) -> PositionRecord | None:
     node_id = to_int(row["node_id"])

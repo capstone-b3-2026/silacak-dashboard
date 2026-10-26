@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api.v1 import alerts, app_config, base, devices, diagnostics, export, gpx, hikers, positions, sites, stream, terrain, sessions
+from app.api.v1 import alerts, app_config, base, devices, diagnostics, export, gpx, hikers, positions, relays, sites, stream, terrain, sessions
 from app.core import database
 from app.core.schema import ensure_schema
 from app.core.config import settings
@@ -42,6 +42,7 @@ app.include_router(devices.router, prefix="/api/v1")
 app.include_router(diagnostics.router, prefix="/api/v1")
 app.include_router(stream.router, prefix="/api/v1")
 app.include_router(base.router, prefix="/api/v1")
+app.include_router(relays.router, prefix="/api/v1")
 app.include_router(app_config.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
 

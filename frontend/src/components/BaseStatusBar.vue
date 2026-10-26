@@ -16,6 +16,14 @@
       :aria-expanded="open" aria-haspopup="dialog" @click="togglePorts"
     >Pilih port</button>
 
+    <!-- baterai relay (dari CSV_RELAY_BATTERY); tombol baru muncul setelah ada laporan -->
+    <button
+      v-if="relays.items.length"
+      class="bb-btn" :class="{ low: relayAlert }" type="button"
+      :aria-expanded="openRelay" aria-haspopup="dialog" :title="relayAlert ? 'Ada relay dengan baterai rendah, sensor bermasalah, atau tidak terdengar.' : 'Status baterai relay'"
+      @click="toggleRelays"
+    >{{ relayAlert ? "! " : "" }}Relay ({{ relays.items.length }}){{ relayMin != null ? ` · terendah ${relayMin}%` : "" }}</button>
+
     <span class="bb-sep" aria-hidden="true"></span>
 
     <!-- suara alarm: browser memblokir bunyi sampai ada klik -->
@@ -56,18 +64,40 @@
         {{ store.portsLoading ? "Memuat…" : "Segarkan daftar port" }}
       </button>
     </div>
+
+    <!-- baterai relay -->
+    <div v-if="openRelay" class="bb-pop" role="dialog" aria-label="Baterai relay" @keydown.esc="openRelay = false">
+      <div class="bb-pop-h">
+        <strong>Baterai relay</strong>
+        <button class="bb-x" type="button" aria-label="Tutup" @click="openRelay = false">✕</button>
+      </div>
+      <p class="bb-hint">Dilaporkan tiap relay sekitar 30 detik sekali lewat base. Persen adalah perkiraan dari tegangan, bukan pengukur kapasitas yang akurat.</p>
+      <div v-for="r in relayRows" :key="r.relay_id" class="bb-opt" :class="{ cur: r.problem }">
+        <span>
+          <b>{{ r.title }}</b>
+          <span class="bb-tag" :class="{ bad: r.problem }">{{ r.status }}</span>
+          <br />
+          <small>{{ r.detail }}</small>
+        </span>
+      </div>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useBaseStore } from "../stores/base";
+import { RELAY_LOW_PCT, RELAY_STALE_MS, useRelayStore } from "../stores/relays";
 import { useDiagnosticsStore } from "../stores/diagnostics";
 import { enableSound, sound } from "../composables/useAlarmSound";
 
 const store = useBaseStore();
 const diag = useDiagnosticsStore();
 const open = ref(false);
+const relays = useRelayStore();
+const openRelay = ref(false);
+onMounted(() => relays.start());
+onUnmounted(() => relays.stop());
 
 // state backend: off | unavailable | searching | ambiguous | connected | reconnecting
 const view = computed(() => {
@@ -118,8 +148,53 @@ const lastText = computed(() => (lastAt.value == null ? "Belum ada paket diterim
 
 async function togglePorts() {
   open.value = !open.value;
+  if (open.value) openRelay.value = false;
   if (open.value) await store.loadPorts();
 }
+function toggleRelays() {
+  openRelay.value = !openRelay.value;
+  if (openRelay.value) open.value = false;
+}
+
+// Teks status sensor baterai relay (gauge_state dari firmware)
+const GAUGE_TEXT = {
+  NO_DEVICE: "sensor baterai tidak terdeteksi",
+  IO_ERROR: "sensor baterai error",
+  INVALID: "pembacaan sensor tidak valid",
+  STALE: "pembacaan sensor basi",
+  WARMING_UP: "sensor sedang menghangat",
+  UNKNOWN: "status sensor tidak diketahui",
+};
+const relayRows = computed(() =>
+  relays.items.map((r) => {
+    // umur laporan = umur saat diambil dari server + waktu yang berlalu sejak itu (tidak bergantung jam laptop)
+    const ageMs = r.age_s * 1000 + (store.now - relays.fetchedAt);
+    const silent = r.stale || ageMs > RELAY_STALE_MS;
+    const ok = r.gauge_state === "OK" && r.battery_pct != null;
+    const low = ok && r.battery_pct <= RELAY_LOW_PCT;
+    let status = "normal";
+    if (silent) status = "tidak terdengar";
+    else if (!ok) status = "sensor bermasalah";
+    else if (low) status = "baterai rendah";
+    const bits = [];
+    if (ok) bits.push(`${r.battery_pct}% · ${Number(r.volts).toFixed(2)} V`);
+    else bits.push(GAUGE_TEXT[r.gauge_state] || GAUGE_TEXT.UNKNOWN);
+    bits.push(`laporan ${ago(ageMs)}`);
+    if (r.rssi_dbm != null) bits.push(`RSSI ${r.rssi_dbm} dBm`);
+    if (r.route_path && r.route_path !== "LANGSUNG") bits.push(`via ${r.route_path}`);
+    return {
+      relay_id: r.relay_id,
+      title: r.name ? `${r.name} (R${r.relay_id})` : `Relay R${r.relay_id}`,
+      status, problem: status !== "normal", detail: bits.join(" · "),
+      pct: ok && !silent ? r.battery_pct : null,
+    };
+  })
+);
+const relayAlert = computed(() => relayRows.value.some((r) => r.problem));
+const relayMin = computed(() => {
+  const v = relayRows.value.map((r) => r.pct).filter((x) => x != null);
+  return v.length ? Math.min(...v) : null;
+});
 async function choose(port) {
   await store.choosePort(port);
 }
@@ -158,6 +233,9 @@ async function choose(port) {
 .bb-btn.attn { background: var(--accent-glow); border-color: var(--accent); }
 .bb-btn.warn { border-color: var(--btn-alt); background: var(--btn-alt); color: var(--on-btn-alt); }
 .bb-btn.warn:hover:not(:disabled) { background: var(--btn-alt-hover); border-color: var(--btn-alt-hover); }
+.bb-btn.low { background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
+.bb-btn.low:hover:not(:disabled) { filter: brightness(1.08); background: var(--amber); }
+.bb-tag.bad { background: var(--amber); border-color: var(--amber); color: var(--on-amber); }
 .bb-btn.ok { color: var(--green); border-color: var(--green); }
 .bb-btn.ok:hover:not(:disabled) { background: var(--green-bg); }
 .bb-pop {

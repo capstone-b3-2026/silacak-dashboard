@@ -11,6 +11,7 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from app.core.config import settings
 from app.core.database import get_db
 
 router = APIRouter(prefix="/devices", tags=["devices"])
@@ -163,6 +164,9 @@ async def delete_device(device_id: int, conn=Depends(get_db)):
 
 @router.post("/{device_id}/push")
 async def push_device(device_id: int, conn=Depends(get_db)):
+    if not settings.firmware_supports_cfg:
+        raise HTTPException(409, "Firmware base saat ini belum menerima konfigurasi dari dashboard, jadi push dimatikan. "
+                                 "Nilai yang disimpan hanya katalog di dashboard.")
     r = await conn.fetchrow("SELECT * FROM devices WHERE id=$1", device_id)
     if not r:
         raise HTTPException(404, "Perangkat tidak ditemukan.")

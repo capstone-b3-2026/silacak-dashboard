@@ -23,6 +23,10 @@ class Settings(BaseSettings):
     serial_port: str = "off"
     serial_baud: int = 115200
     serial_no_ack: bool = False   # firmware belum membalas CFG_ACK; True = anggap 'acked' begitu ditulis
+    # Firmware real v2 (base_real.cpp) TIDAK membaca serial masuk, jadi baris `CFG,...` dari dashboard tidak akan pernah
+    # diterima/dikonfirmasi. False = push konfigurasi ditolak dengan pesan jelas. Ubah ke True HANYA setelah firmware
+    # base mendukung CFG + CFG_ACK.
+    firmware_supports_cfg: bool = False
     raw_log: bool = True          # simpan setiap baris CSV_DATA mentah (append-only) di data_dir/raw/
 
     cors_origins: list[str] = [
