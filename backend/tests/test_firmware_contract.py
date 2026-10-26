@@ -83,5 +83,48 @@ class FirmwareContract(unittest.TestCase):
         self.assertIsNone(bp.parse_csv_data("CSV_DATA,1,2,3"))  # kurang dari 18 field tetap ditolak
 
 
+class AuxLines(unittest.TestCase):
+    """Baris pendukung base_real.cpp. GOLDEN = keluaran formatRelayBattery() di include/real_serial.h (di-compile di host)."""
+    OK = "CSV_RELAY_BATTERY,101,3,4,0,123456,88,3.921,OK,1200,LANGSUNG,0,-101"
+    NODEV = "CSV_RELAY_BATTERY,102,3,5,0,777,-,-,NO_DEVICE,-,R101,1,-"
+    LOW = "CSV_RELAY_BATTERY,103,3,6,0,900,7,3.320,OK,500,LANGSUNG,0,-88"
+
+    def test_relay_ok(self):
+        r = bp.parse_relay_battery(self.OK)
+        self.assertEqual((r["relay_id"], r["battery_pct"], r["volts"], r["gauge_state"], r["rssi_dbm"]), (101, 88.0, 3.921, "OK", -101))
+        self.assertEqual((r["route_path"], r["hop_count"], r["sample_age_ms"]), ("LANGSUNG", 0, 1200))
+
+    def test_relay_sensor_tidak_ada_tidak_jadi_nol_persen(self):
+        r = bp.parse_relay_battery(self.NODEV)
+        self.assertEqual((r["gauge_state"], r["battery_pct"], r["volts"], r["rssi_dbm"], r["sample_age_ms"]), ("NO_DEVICE", None, None, None, None))
+        self.assertEqual((r["route_path"], r["hop_count"]), ("R101", 1))
+
+    def test_relay_baterai_rendah_tetap_terbaca(self):
+        self.assertEqual(bp.parse_relay_battery(self.LOW)["battery_pct"], 7.0)
+
+    def test_relay_state_ok_tapi_volt_ngawur_dibuang(self):
+        r = bp.parse_relay_battery("CSV_RELAY_BATTERY,101,3,4,0,1,88,9.999,OK,10,LANGSUNG,0,-90")
+        self.assertEqual((r["battery_pct"], r["volts"]), (None, None))
+
+    def test_relay_stats_dan_baris_rusak_ditolak(self):
+        self.assertIsNone(bp.parse_relay_battery("CSV_RELAY_BATTERY_STATS,BASE,0,0"))
+        self.assertIsNone(bp.parse_relay_battery("CSV_RELAY_BATTERY,101,3,4"))
+        self.assertIsNone(bp.parse_relay_battery("CSV_RELAY_BATTERY,x,3,4,0,1,88,3.9,OK,10,LANGSUNG,0,-90"))
+        self.assertIsNone(bp.parse_relay_battery("RELAY R101 | Baterai 88% | Tegangan 3.921 V | OK | Jalur LANGSUNG | RSSI -101 dBm"))
+
+    def test_link(self):
+        self.assertEqual(bp.parse_csv_link("CSV_LINK,1,5,42,R101:-87,R102:-"),
+                         {"node_id": 1, "boot_id": 5, "sequence": 42,
+                          "hops": [{"relay_id": 101, "rssi_dbm": -87}, {"relay_id": 102, "rssi_dbm": None}]})
+        self.assertEqual(bp.parse_csv_link("CSV_LINK,1,5,42")["hops"], [])  # paket langsung
+        self.assertIsNone(bp.parse_csv_link("CSV_LINK,1,5"))
+        self.assertIsNone(bp.parse_csv_link("CSV_LINK,1,5,42,X9:-1"))
+
+    def test_boot(self):
+        self.assertEqual(bp.parse_csv_boot("CSV_BOOT,1,5"), {"node_id": 1, "boot_id": 5})
+        self.assertIsNone(bp.parse_csv_boot("CSV_BOOT,1"))
+        self.assertIsNone(bp.parse_csv_boot("CSV_BOOT,a,b"))
+
+
 if __name__ == "__main__":
     unittest.main()

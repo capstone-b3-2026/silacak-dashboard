@@ -234,10 +234,14 @@
     <!-- ═════════ TAB PERANGKAT ═════════ -->
     <div v-else class="sb">
       <p v-if="dev.error" class="err">{{ dev.error }}</p>
+      <p v-if="!cfgOn" class="hint">
+        Push konfigurasi dimatikan: firmware base saat ini belum menerima perintah dari dashboard, jadi nilai di bawah hanya
+        tersimpan sebagai katalog di dashboard dan tidak mengubah alat.
+      </p>
 
       <section class="pnl">
         <div class="ph"><span class="tl">Daftar perangkat</span>
-          <button class="btn sm" :disabled="!dev.outOfSync.length || dev.busy" @click="dev.pushAll()">
+          <button class="btn sm" :disabled="!cfgOn || !dev.outOfSync.length || dev.busy" @click="dev.pushAll()">
             Push semua ({{ dev.outOfSync.length }})
           </button>
         </div>
@@ -267,8 +271,8 @@
             </div>
             <p v-if="d.last_command?.status === 'failed' && d.last_command.error" class="err sm">{{ d.last_command.error }}</p>
             <div class="row">
-              <button class="btn sm primary" :disabled="dev.busy || pushing(d)" @click="dev.push(d.id)">
-                {{ pushing(d) ? "Menunggu bridge…" : "Push ke alat" }}
+              <button class="btn sm primary" :disabled="!cfgOn || dev.busy || pushing(d)" @click="dev.push(d.id)">
+                {{ !cfgOn ? "Push dimatikan" : pushing(d) ? "Menunggu bridge…" : "Push ke alat" }}
               </button>
               <button class="btn sm" @click="edit(d)">Edit</button>
               <button class="btn sm danger" @click="askRemove(d)">Hapus</button>
@@ -308,12 +312,16 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useSiteStore } from "../stores/site";
 import { useDeviceStore } from "../stores/devices";
+import { useBaseStore } from "../stores/base";
 import { planGpxUrl } from "../services/api";
 import { trailSegments } from "../utils/routeGeo";
 import ParamTip from "./ParamTip.vue";
 
 const site = useSiteStore();
 const dev = useDeviceStore();
+// Push konfigurasi hanya jalan kalau backend melaporkan firmware base mendukung CFG (FIRMWARE_SUPPORTS_CFG). Bawaan: mati.
+const baseStatus = useBaseStore();
+const cfgOn = computed(() => baseStatus.status?.cfg_downlink === true);
 const tab = ref("site");
 
 // ── lokasi ──

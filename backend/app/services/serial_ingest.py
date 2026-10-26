@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 
 from app.core import database
 from app.core.config import settings
-from app.repositories import alert_repo
+from app.repositories import alert_repo, relay_repo
 from app.services import base_protocol as bp
 from app.services.notifier import notifier
 
@@ -70,6 +70,8 @@ class SerialIngest:
         self._last_error: str | None = None
         self._packets = 0
         self._rejected = 0
+        self._relay_reports = 0       # CSV_RELAY_BATTERY yang berhasil disimpan
+        self._last_relay_at: datetime | None = None
         self._last_packet_at: datetime | None = None
         self._cache: dict[int, tuple[float, int | None, str | None]] = {}  # node_id -> (exp, hiker_id, role)
 
@@ -127,6 +129,9 @@ class SerialIngest:
             "last_packet_at": self._last_packet_at.isoformat() if self._last_packet_at else None,
             "last_error": self._last_error,
             "raw_log": settings.raw_log,
+            "cfg_downlink": settings.firmware_supports_cfg,  # False = push konfigurasi dimatikan (firmware belum mendukung)
+            "relay_reports": self._relay_reports,
+            "last_relay_at": self._last_relay_at.isoformat() if self._last_relay_at else None,
         }
 
     def set_port(self, port: str) -> None:
@@ -244,6 +249,14 @@ class SerialIngest:
                     log.warning("Gagal menulis log mentah: %s", exc)
             self._submit(self._handle_timing(raw))
             return
+        if raw.startswith(("CSV_RELAY_BATTERY,", "CSV_LINK,", "CSV_BOOT,")):  # baris pendukung dari base_real.cpp
+            if settings.raw_log:
+                try:
+                    self._write_raw(raw)
+                except OSError as exc:
+                    log.warning("Gagal menulis log mentah: %s", exc)
+            self._submit(self._handle_aux(raw))
+            return
         if not raw.startswith("CSV_DATA,"):
             return
         if settings.raw_log:
@@ -272,6 +285,35 @@ class SerialIngest:
             self._rejected += 1
             return
         await self._store(rec)
+
+    async def _handle_aux(self, raw: str) -> None:
+        """Baterai relay / RSSI per hop / reboot pendaki. Gagal di sini TIDAK boleh mengganggu aliran CSV_DATA."""
+        pool = database.pool
+        if pool is None:
+            return
+        try:
+            if raw.startswith("CSV_RELAY_BATTERY,"):
+                rec = bp.parse_relay_battery(raw)
+                if rec is None:
+                    self._rejected += 1
+                    return
+                async with pool.acquire() as conn:
+                    await relay_repo.insert_relay_status(conn, rec)
+                self._relay_reports += 1
+                self._last_relay_at = datetime.now(timezone.utc)
+            elif raw.startswith("CSV_LINK,"):
+                rec = bp.parse_csv_link(raw)
+                if rec is not None:
+                    async with pool.acquire() as conn:
+                        await relay_repo.insert_link_hops(conn, rec)
+            elif raw.startswith("CSV_BOOT,"):
+                rec = bp.parse_csv_boot(raw)
+                if rec is not None:
+                    log.info("Pendaki node %s reboot (boot_id=%s)", rec["node_id"], rec["boot_id"])
+                    async with pool.acquire() as conn:
+                        await relay_repo.insert_node_boot(conn, rec)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("Gagal menyimpan baris pendukung (%s): %s", raw.split(",", 1)[0], exc)
 
     async def _handle_timing(self, raw: str) -> None:
         """CSV_TIMING tiba SESUDAH CSV_DATA paket yang sama (urutan serial terjaga) -> isi rtt_ms barisnya.
@@ -348,6 +390,17 @@ class SerialIngest:
     async def _downlink_loop(self) -> None:
         while True:
             await asyncio.sleep(DOWNLINK_POLL_S)
+            if not settings.firmware_supports_cfg and database.pool is not None:
+                # Firmware belum membaca serial masuk: gagalkan perintah tertunda dengan alasan jelas, jangan dibiarkan 'sent' selamanya.
+                try:
+                    async with database.pool.acquire() as conn:
+                        await conn.execute(
+                            "UPDATE device_commands SET status='failed', error=$1, updated_at=now() WHERE status='pending'",
+                            "Firmware base belum mendukung konfigurasi dari dashboard (FIRMWARE_SUPPORTS_CFG=false).",
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    log.warning("Downlink: gagal menandai perintah: %s", exc)
+                continue
             ser = self._ser
             if ser is None or database.pool is None:
                 continue
