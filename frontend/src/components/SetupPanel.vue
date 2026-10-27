@@ -117,6 +117,28 @@
                 </li>
               </ul>
             </div>
+            <!-- Ringkasan relay: SELALU tampil. Tombol "Hitung relay" dinonaktifkan secara visual
+                 bila trail belum cukup; klik paksa memunculkan notice. Relay tetap keluaran planner
+                 (runPlan) - tidak ada penempatan manual di sini. -->
+            <div class="row">
+              <div class="grow">
+                <span class="lbl">Relay</span>
+                <b v-if="relayCoverage.hasPlan">
+                  <span class="chip" :class="relayCoverage.statusClass">{{ relayCoverage.text }}</span>
+                  <span class="relay-count">· {{ relayCoverage.relays }} relay</span>
+                </b>
+                <b v-else class="muted">belum dihitung</b>
+              </div>
+              <button
+                v-if="!relayCoverage.hasPlan"
+                class="btn sm"
+                :class="{ 'is-off': !relayCoverage.canPlan }"
+                :disabled="site.busy"
+                @click="tryRunPlan()"
+              >
+                {{ site.busy ? "Menghitung…" : "Hitung relay" }}
+              </button>
+            </div>
             <div class="row" v-if="site.site.trail.length">
               <button class="btn sm" @click="site.undoTrail()">Undo titik</button>
               <button class="btn sm danger" @click="site.clearTrail()">Hapus trail</button>
@@ -261,6 +283,33 @@ const trail3dText = computed(() => {
   return m == null ? null : fmtDist(m);
 });
 
+// Ringkasan coverage relay untuk langkah 2. Teks & kelas chip DISALIN PERSIS dari SetupAdvanced langkah 4
+// supaya keduanya tidak pernah berbeda. Bila belum ada plan, tentukan apakah tombol "Hitung relay"
+// layak muncul (syarat sama dengan runPlan: base ada DAN trail minimal 2 titik).
+const relayCoverage = computed(() => {
+  const plan = site.site?.plan;
+  if (!plan) {
+    const canPlan = !!site.site?.base && (site.site?.trail?.length || 0) >= 2;
+    return { hasPlan: false, canPlan };
+  }
+  return {
+    hasPlan: true,
+    text: plan.covers_all ? "trail tercover" : `${plan.uncovered_points} titik belum tercover`,
+    statusClass: plan.covers_all ? "ready" : "error",
+    relays: plan.relays.length,
+  };
+});
+
+// Tombol "Hitung relay" SELALU tampil (meski trail belum ada) tapi dinonaktifkan secara visual.
+// Kalau dipaksa klik saat syarat belum terpenuhi, tampilkan notice, bukan diam saja.
+function tryRunPlan() {
+  if (!relayCoverage.value.canPlan) {
+    site.error = "Isi jalur pendakian dulu (base + minimal 2 titik) sebelum menghitung relay.";
+    return;
+  }
+  site.runPlan();
+}
+
 const statusLabel = computed(
   () => ({ processing: "memproses", ready: "siap", error: "gagal" }[site.site?.status] || site.site?.status)
 );
@@ -363,11 +412,14 @@ label { display: flex; flex-direction: column; gap: 5px; }
 .btn.active { background: var(--btn-alt); border-color: var(--btn-alt); color: var(--on-btn-alt); }
 .btn.danger { color: var(--red); }
 .btn.sm { height: 32px; padding: 0 11px; font-size: 14px; }
+/* Tombol tampak nonaktif (syarat belum terpenuhi) tapi tetap bisa diklik untuk memunculkan notice. */
+.btn.is-off { opacity: 0.45; }
 
 .chip { font-size: 13px; font-weight: 700; padding: 3px 10px; border-radius: 99px; border: 1px solid var(--line-3); color: var(--text-2); white-space: nowrap; }
 .chip.ready { color: var(--green); border-color: var(--green); }
 .chip.processing, .chip.warn { color: var(--text-2); border-color: var(--text-2); }
 .chip.error { color: var(--red); border-color: var(--red); }
+.relay-count { font-size: 14px; font-weight: 600; color: var(--text-2); margin-left: 6px; }
 
 .drop { border: 1.5px dashed var(--line-3); border-radius: 12px; padding: 18px 12px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; text-align: center; transition: background 0.12s, border-color 0.12s; color: var(--text); }
 .drop span { font-size: 14px; color: var(--muted); }
