@@ -50,7 +50,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, watch } from "vue";
 import { useAlertStore } from "../stores/alerts";
 import { useHikerStore } from "../stores/hikers";
 import { useDiagnosticsStore } from "../stores/diagnostics";
@@ -88,13 +88,16 @@ function notifyBrowser(alert) {
   });
 }
 
-// Trigger beep + notifikasi cuma buat alert yang BENERAN baru masuk,
-// bukan tiap kali array alerts berubah (misal pas ada yang di-acknowledge).
+// Trigger beep + notifikasi HANYA buat alert yang BENERAN baru terjadi (ditandai _live oleh alertStore:
+// datang lewat SSE, atau baru ketahuan lewat sinkronisasi berkala setelah muat awal).
+// Alarm yang sudah ACTIVE di database saat dashboard dibuka (muat awal) tetap TAMPIL sebagai kartu supaya
+// operator tidak melewatkan SOS yang belum ditangani, tapi tidak membunyikan alarm / notifikasi browser.
+// Sebelumnya knownIds kosong saat muat awal, sehingga semua alarm lama dianggap "baru" -> bunyi + notifikasi.
 watch(
   () => alertStore.alerts,
   (alerts) => {
     for (const a of alerts) {
-      if (!knownIds.has(a.id)) {
+      if (!knownIds.has(a.id) && a._live) {
         beep();
         notifyBrowser(a);
       }
@@ -103,6 +106,15 @@ watch(
   },
   { deep: true, immediate: true }
 );
+
+// Jaring pengaman: siaran SSE tidak diulang bila koneksi sempat putus (backend restart, laptop sleep, dsb.),
+// sehingga SOS yang terjadi saat itu tidak pernah muncul sampai halaman di-refresh. Sinkronkan daftar alarm
+// dari server tiap 10 detik; alarm yang baru ketahuan di sini ditandai _live dan dibunyikan.
+let syncTimer = null;
+onMounted(() => {
+  syncTimer = setInterval(() => alertStore.sync(), 10000);
+});
+onBeforeUnmount(() => clearInterval(syncTimer));
 
 // ── alarm "node tidak terdengar" & "baterai rendah" (turunan dari data yang sudah ada) ──
 const muted = reactive({}); // kode alat -> true = disenyapkan sampai terdengar lagi
