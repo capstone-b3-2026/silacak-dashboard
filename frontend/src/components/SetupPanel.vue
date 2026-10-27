@@ -144,7 +144,7 @@
     <!-- ═════════ TAB PERANGKAT ═════════ -->
     <div v-else class="sb">
       <p v-if="dev.error" class="err">{{ dev.error }}</p>
-      <p v-if="!cfgOn" class="hint">
+      <p v-if="!cfgOn" class="hint" style="padding: 14px 0 0 14px">
         Push konfigurasi dimatikan: firmware base saat ini belum menerima perintah dari dashboard, jadi nilai di bawah hanya
         tersimpan sebagai katalog di dashboard dan tidak mengubah alat.
       </p>
