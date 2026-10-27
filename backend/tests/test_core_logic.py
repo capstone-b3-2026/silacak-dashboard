@@ -7,7 +7,9 @@ import unittest
 from datetime import datetime, timezone
 
 from app.services import base_protocol as bp
-from app.services.geo import haversine_m, thin_indices, thin_track
+from app.services.geo import (
+    choose_window_minutes, dist_point_to_trail_m, haversine_m, thin_indices, thin_track,
+)
 from app.services.liveness import FALLBACK_S, MAX_S, MIN_S, observed_interval_s, stale_threshold_s
 
 FIX = "CSV_DATA,123,1,H01,LANGSUNG,0,45000,45010,31,2026-07-01T03:04:05Z,-7.5912345,110.4001234,1450.20,1.20,9,0.95,-97,2,5"
@@ -282,6 +284,50 @@ class TrailProfil3D(unittest.TestCase):
         # 3D ~= horizontal. Profil penuh melewati lembah -1500 m lalu naik lagi -> jauh lebih panjang,
         # membuktikan perhitungan memakai SEMUA sub-titik, bukan sekadar dua ujung segmen.
         self.assertGreater(res["segments"][0]["dist_3d_m"], res["total_horizontal_m"] + 300)
+
+
+class DistToTrail(unittest.TestCase):
+    """Jarak titik ke polyline trail (meter). Konvensi LAT DULU, tidak boleh tukar lat/lon.
+
+    Trail acuan = segmen vertikal (bujur konstan 110.40) dari (-7.60) ke (-7.59) lintang.
+    Di lintang ~-7.595, 1 derajat bujur ~ 110.3 km, 1 derajat lintang ~ 110.54 km."""
+    TRAIL = [(-7.60, 110.40), (-7.59, 110.40)]
+
+    def test_titik_di_atas_trail_nol(self):
+        d = dist_point_to_trail_m((-7.595, 110.40), self.TRAIL)
+        self.assertAlmostEqual(d, 0.0, delta=0.5)
+
+    def test_titik_dekat_perimeter_sekitar_50m(self):
+        # 0.00045 derajat bujur di lintang -7.595 ~ 49.7 m (perpendikular ke segmen vertikal).
+        d = dist_point_to_trail_m((-7.595, 110.40045), self.TRAIL)
+        self.assertAlmostEqual(d, 49.7, delta=3.0)
+
+    def test_titik_jauh(self):
+        # ~0.01 derajat bujur ~ 1.1 km, jauh di luar koridor.
+        d = dist_point_to_trail_m((-7.595, 110.41), self.TRAIL)
+        self.assertGreater(d, 900.0)
+
+    def test_trail_satu_titik_jarak_ke_titik_itu(self):
+        # Jarak ke titik tunggal (-7.60, 110.40) dari titik yang digeser ~110 m ke utara.
+        d = dist_point_to_trail_m((-7.599, 110.40), [(-7.60, 110.40)])
+        self.assertAlmostEqual(d, 110.54, delta=5.0)
+
+    def test_trail_kosong_tak_hingga(self):
+        self.assertEqual(dist_point_to_trail_m((-7.60, 110.40), []), float("inf"))
+
+    def test_hasil_float(self):
+        self.assertIsInstance(dist_point_to_trail_m((-7.595, 110.40), self.TRAIL), float)
+
+
+class PilihWindow(unittest.TestCase):
+    def test_di_dalam_perimeter_window_panjang(self):
+        self.assertEqual(choose_window_minutes(30.0, 50.0, 480, 240), 480)
+
+    def test_di_luar_perimeter_window_pendek(self):
+        self.assertEqual(choose_window_minutes(80.0, 50.0, 480, 240), 240)
+
+    def test_tepat_di_perimeter_dianggap_di_dalam(self):
+        self.assertEqual(choose_window_minutes(50.0, 50.0, 480, 240), 480)
 
 
 if __name__ == "__main__":

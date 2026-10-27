@@ -11,6 +11,17 @@ class Settings(BaseSettings):
     stagnant_radius_m: float = 50.0
     stagnant_check_interval_minutes: int = 2
 
+    # Perimeter/koridor di sekitar jalur pendakian. Kalau posisi TERAKHIR pendaki masih di dalam
+    # koridor (<= stagnant_perimeter_m dari garis trail), diam dianggap wajar (istirahat/tidur) ->
+    # window panjang. Kalau di LUAR koridor (menyimpang dari jalur), diam mencurigakan (kecelakaan)
+    # -> window pendek. stagnant_radius_m tetap menentukan APAKAH pendaki diam; nilai di bawah hanya
+    # memilih BERAPA LAMA toleransinya.
+    # ASUMSI BELUM DIKALIBRASI (belum diuji di lapangan, seperti catatan di app_settings.py):
+    # 50 m koridor, 480 menit (~8 jam, satu malam tidur) di dalam, 240 menit (4 jam) di luar.
+    stagnant_perimeter_m: float = 50.0
+    stagnant_window_inside_minutes: int = 480
+    stagnant_window_outside_minutes: int = 240
+
     # Folder data (DEM/tile hasil Setup, log mentah serial). Sama dengan env DATA_DIR yang dibaca sites.py.
     data_dir: str = "/app/data"
 

@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 
 
@@ -118,6 +119,38 @@ async def get_track_points(conn, hiker_code: str):
     supaya perjalanan pendaki sebelumnya tidak tercampur."""
     sid = await resolve_session_id(conn, hiker_code)
     return await get_session_track(conn, sid) if sid else []
+
+
+async def get_active_site_trail(conn):
+    """Trail (jalur pendakian) lokasi yang sedang aktif, sebagai list [lat, lon].
+    Ada tepat satu lokasi aktif. NULL/kosong/tidak ada -> [] (pemanggil melewati deteksi)."""
+    val = await conn.fetchval(
+        "SELECT trail FROM sites WHERE is_active ORDER BY id DESC LIMIT 1"
+    )
+    if val is None:
+        return []
+    trail = json.loads(val) if isinstance(val, str) else val
+    return trail or []
+
+
+async def get_active_sessions_latest_position(conn):
+    """Sesi aktif + posisi (fix) TERAKHIR-nya sebagai (lat, lon). Dipakai stagnant_detector
+    untuk mengukur jarak tiap sesi ke trail. Sesi tanpa fix sama sekali tidak ikut."""
+    rows = await conn.fetch(
+        """
+        SELECT s.id AS session_id,
+               (last.location)[1] AS lat,
+               (last.location)[0] AS lon
+        FROM hiking_sessions s
+        JOIN LATERAL (
+            SELECT location FROM positions
+            WHERE session_id = s.id AND location IS NOT NULL
+            ORDER BY recorded_at DESC LIMIT 1
+        ) last ON TRUE
+        WHERE s.status = 'active'
+        """
+    )
+    return [dict(r) for r in rows]
 
 
 async def find_stagnant_sessions(conn, window_minutes: int, radius_m: float):

@@ -1,6 +1,6 @@
 // Tes logika rute (tanpa browser). Jalankan: node frontend/src/utils/routeGeo.test.mjs
 import assert from "node:assert/strict";
-import { buildRoute, haversineM, parseRoute, routeFeatureCollection, trailSegments, unresolvedMessage } from "./routeGeo.js";
+import { buildRoute, haversineM, parseRoute, routeFeatureCollection, trailCorridor, trailSegments, unresolvedMessage } from "./routeGeo.js";
 
 const base = { lat: -7.58, lon: 110.45 };
 const relays = [
@@ -105,5 +105,38 @@ assert.equal(ts.segments.length, 2);
 assert.equal(ts.segments[1].m, 0); // titik1 == titik2
 // base null diperlakukan konsisten (predikat baseOk boolean sungguhan)
 assert.equal(trailSegments(undefined, []).totalM, 0);
+
+// ── trailCorridor (railing di sekitar trail) ──
+// INPUT [lat, lon]; OUTPUT koordinat [lon, lat]. 0/1 titik -> kosong, tidak melempar.
+let cor = trailCorridor([], 50);
+assert.deepEqual(cor.features, []); // trail kosong -> kosong
+cor = trailCorridor([[-7.58, 110.45]], 50);
+assert.deepEqual(cor.features, []); // 1 titik -> kosong, tanpa throw
+cor = trailCorridor(undefined, 50);
+assert.deepEqual(cor.features, []); // argumen tak valid -> kosong, tanpa throw
+
+// 2 titik -> dua rel (kiri & kanan), masing-masing jumlah simpul = jumlah trail
+const corTrail = [[-7.580, 110.450], [-7.583, 110.453]];
+cor = trailCorridor(corTrail, 50);
+assert.equal(cor.features.length, 2);
+const leftF = cor.features.find((f) => f.properties.side === "left");
+const rightF = cor.features.find((f) => f.properties.side === "right");
+assert.ok(leftF && rightF);
+assert.equal(leftF.properties.kind, "corridor");
+assert.equal(leftF.geometry.coordinates.length, corTrail.length);
+assert.equal(rightF.geometry.coordinates.length, corTrail.length);
+// geseran tidak nol: rel menjauh dari titik trail aslinya (bandingkan simpul pertama)
+const [laTrail0, loTrail0] = corTrail[0];
+const [loL0, laL0] = leftF.geometry.coordinates[0];
+const [loR0, laR0] = rightF.geometry.coordinates[0];
+assert.ok(Math.abs(loL0 - loTrail0) > 1e-9 || Math.abs(laL0 - laTrail0) > 1e-9); // benar-benar digeser
+// kiri & kanan kira-kira simetris terhadap garis trail (titik trail = tengah dua rel)
+assert.ok(Math.abs((loL0 + loR0) / 2 - loTrail0) < 1e-9);
+assert.ok(Math.abs((laL0 + laR0) / 2 - laTrail0) < 1e-9);
+// output urutan [lon, lat]: lon ~110.45 (bukan -7.5), lat ~-7.58 -> pastikan tidak tertukar
+assert.ok(loL0 > 100 && laL0 < 0);
+// besar geseran kira-kira seukuran perimeter (50 m ~ 0.00045 derajat lintang), toleransi longgar
+const offMagLat = Math.abs(laL0 - laTrail0);
+assert.ok(offMagLat > 0 && offMagLat < 0.002);
 
 console.log("routeGeo: semua OK");

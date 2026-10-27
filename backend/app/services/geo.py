@@ -33,6 +33,44 @@ def _perp_dist(p, a, b) -> float:
     return math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy))
 
 
+def dist_point_to_trail_m(point, trail) -> float:
+    """Jarak terpendek (meter) dari sebuah titik ke garis jalur (polyline).
+
+    Konvensi KETAT: semua koordinat LAT DULU, (lat, lon) — sama dengan kolom
+    `trail` di tabel sites. JANGAN menukar lat/lon (bug historis #1 proyek ini).
+
+    - `point`  = (lat, lon)
+    - `trail`  = [(lat, lon), ...]
+
+    Dipakai ulang _project (lat/lon -> meter datar lokal) + _perp_dist (titik ke
+    segmen di bidang meter), tidak ada rumus jarak baru. Proyeksi memakai lat0 dari
+    gabungan titik + trail supaya titik dan segmen berada di bidang meter yang sama.
+
+    Kasus batas:
+    - trail kosong -> float('inf') (artinya "tidak ada jalur", pemanggil melewati).
+    - trail 1 titik -> jarak ke titik itu.
+    """
+    if not trail:
+        return float("inf")
+    proj = _project([point] + list(trail))
+    p = proj[0]
+    pts = proj[1:]
+    if len(pts) == 1:
+        return math.hypot(p[0] - pts[0][0], p[1] - pts[0][1])
+    best = float("inf")
+    for a, b in zip(pts, pts[1:]):
+        d = _perp_dist(p, a, b)
+        if d < best:
+            best = d
+    return best
+
+
+def choose_window_minutes(dist_m: float, perimeter_m: float, inside_min: int, outside_min: int) -> int:
+    """Pilih window stagnan: di dalam koridor (jarak <= perimeter) -> inside_min (panjang),
+    di luar -> outside_min (pendek). Murni biar bisa diuji unit."""
+    return inside_min if dist_m <= perimeter_m else outside_min
+
+
 def _rdp(xy, eps: float) -> list[int]:
     """Ramer-Douglas-Peucker iteratif. Return indeks yang dipertahankan (terurut)."""
     n = len(xy)
