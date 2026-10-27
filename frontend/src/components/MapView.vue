@@ -50,7 +50,7 @@ import { useAlertStore } from "../stores/alerts";
 import { useSiteStore } from "../stores/site";
 import { useDeviceStore } from "../stores/devices";
 import { useUiStore } from "../stores/ui";
-import { buildRoute, routeFeatureCollection, unresolvedMessage } from "../utils/routeGeo";
+import { buildRoute, routeFeatureCollection, trailCorridor, unresolvedMessage } from "../utils/routeGeo";
 
 const props = defineProps({ theme: { type: String, default: "dark" } });
 defineEmits(["toggle-theme"]);
@@ -420,6 +420,10 @@ function siteMarker(label, cls, lon, lat, title, { draggable = false, onDragEnd 
 function syncSite() {
   if (!mapReady) return;
   map.getSource("site")?.setData(siteGeo());
+  // Railing koridor: selalu tampil saat trail punya >=2 titik. 50 m mencerminkan backend
+  // stagnant_perimeter_m (ASUMSI — payload site belum membawa nilainya, jadi di-hardcode 50).
+  // trailCorridor aman untuk trail 0/1 titik (kembalikan koridor kosong, tidak melempar).
+  map.getSource("site-corridor")?.setData(trailCorridor(siteStore.site?.trail || [], 50));
   siteMarkers.forEach((m) => m.remove());
   siteMarkers = [];
   const st = siteStore.site;
@@ -465,6 +469,15 @@ onMounted(() => {
       source: "tracks",
       layout: { "line-join": "round", "line-cap": "round" },
       paint: { "line-color": ["get", "color"], "line-width": 3.5, "line-opacity": 0.85 },
+    });
+    // "Railing" koridor perimeter stagnan di sekitar trail: dua garis putus-putus NON-merah (kuning pudar,
+    // konsisten dengan trail #e0a800 / batas DEM #e0b050 — merah khusus SOS). Ditaruh sebelum site-trail
+    // supaya z-order di bawah garis trail dan di bawah marker (marker = elemen DOM, selalu di atas).
+    map.addSource("site-corridor", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+    map.addLayer({
+      id: "site-corridor", type: "line", source: "site-corridor", filter: ["==", ["get", "kind"], "corridor"],
+      layout: { "line-join": "round", "line-cap": "round" },
+      paint: { "line-color": "#e0b050", "line-width": 1.2, "line-opacity": 0.45, "line-dasharray": [1, 2] },
     });
     map.addSource("site", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
     map.addLayer({

@@ -98,6 +98,79 @@ export function trailSegments(base, points = []) {
   return { totalM, segments };
 }
 
+// Perkiraan derajat lintang per meter. ~111320 m per derajat lintang (konstanta kasar, sama ordenya
+// dengan kx/ky di backend/app/services/geo.py). Dipakai untuk menggeser "railing" koridor tipis saja,
+// bukan hitungan jarak presisi.
+const LAT_DEG_PER_M = 1 / 111320;
+
+/**
+ * "Railing" koridor di sekitar trail: dua polyline (rel kiri & rel kanan) yang digeser ~perimeterM
+ * tegak lurus arah lokal trail. Murni (tanpa MapLibre). Ini penanda visual kasar, bukan buffer presisi.
+ *
+ * KONVENSI lat/lon (bug #1 proyek): INPUT trail = array [lat, lon] (lintang dulu, sama dengan site.trail).
+ * OUTPUT koordinat dalam urutan MapLibre [lon, lat]. JANGAN menukar lat/lon.
+ *
+ * Geseran: ~perimeterM/111320 derajat lintang; komponen bujur dibagi cos(lat) karena 1 derajat bujur
+ * makin pendek menjauhi khatulistiwa. Untuk tiap simpul dipakai arah segmen yang berdekatan (rata-rata
+ * arah masuk & keluar) lalu diputar 90 derajat.
+ *
+ * 0 atau 1 titik -> koridor kosong (tidak melempar error).
+ *
+ * @param {Array<[number, number]>} trail titik trail [lat, lon]
+ * @param {number} perimeterM lebar perimeter dari trail (meter), default 50
+ * @returns {{ type:'FeatureCollection', features:Array }} dua Feature LineString properties.kind='corridor', side 'left'/'right'
+ */
+export function trailCorridor(trail = [], perimeterM = 50) {
+  const empty = { type: "FeatureCollection", features: [] };
+  if (!Array.isArray(trail) || trail.length < 2) return empty;
+
+  // Arah tiap segmen dalam ruang derajat, dengan bujur dinormalkan oleh cos(lat) agar tegak lurus
+  // bermakna di permukaan bumi (bukan di grid derajat yang memanjang).
+  const n = trail.length;
+  const segDir = []; // segDir[i] = arah dari simpul i ke i+1, {dx, dy} ternormalisasi (x timur, y utara)
+  for (let i = 0; i < n - 1; i++) {
+    const [la1, lo1] = trail[i];
+    const [la2, lo2] = trail[i + 1];
+    const latMid = (la1 + la2) / 2;
+    const dx = (lo2 - lo1) * Math.cos((latMid * Math.PI) / 180); // komponen timur (derajat ternormalkan)
+    const dy = la2 - la1; // komponen utara
+    const len = Math.hypot(dx, dy) || 1;
+    segDir.push({ dx: dx / len, dy: dy / len });
+  }
+
+  const latOff = perimeterM * LAT_DEG_PER_M; // geseran dalam derajat lintang
+  const left = [];
+  const right = [];
+  for (let i = 0; i < n; i++) {
+    const [lat, lon] = trail[i];
+    // Arah simpul: segmen masuk + keluar (rata-rata) supaya belokan tidak patah kasar.
+    const a = segDir[i - 1];
+    const b = segDir[i];
+    let dx = (a?.dx ?? 0) + (b?.dx ?? 0);
+    let dy = (a?.dy ?? 0) + (b?.dy ?? 0);
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len;
+    dy /= len;
+    // Normal kiri (putar +90 derajat): (-dy, dx) dalam ruang (timur, utara).
+    const nxEast = -dy; // komponen timur normal
+    const nyNorth = dx; // komponen utara normal
+    const dLat = nyNorth * latOff;
+    // Balik normalisasi cos(lat): komponen timur dalam derajat bujur dibagi cos(lat).
+    const cosLat = Math.cos((lat * Math.PI) / 180) || 1;
+    const dLon = (nxEast * latOff) / cosLat;
+    left.push([lon + dLon, lat + dLat]); // [lon, lat] untuk MapLibre
+    right.push([lon - dLon, lat - dLat]);
+  }
+
+  return {
+    type: "FeatureCollection",
+    features: [
+      { type: "Feature", properties: { kind: "corridor", side: "left" }, geometry: { type: "LineString", coordinates: left } },
+      { type: "Feature", properties: { kind: "corridor", side: "right" }, geometry: { type: "LineString", coordinates: right } },
+    ],
+  };
+}
+
 /** GeoJSON untuk MapLibre: satu garis rute + titik sorot di tiap relay yang dilewati. */
 export function routeFeatureCollection(route) {
   const features = [];
