@@ -81,10 +81,10 @@
           <div class="lgnd">
             <div class="lg"><span class="sw circle" style="background: var(--marker)"></span>Pendaki</div>
             <div class="lg"><span class="sw circle" style="background: var(--red)"></span>SOS</div>
-            <div class="lg dim"><span class="sw circle" style="background: var(--violet)"></span>Relay (belum ada data)</div>
-            <div class="lg dim"><span class="sw circle" style="background: var(--green)"></span>Base (belum ada data)</div>
-            <div class="lg dim"><span class="sw line" style="background: var(--green)"></span>Link kuat (belum ada data)</div>
-            <div class="lg dim"><span class="sw line" style="background: var(--amber)"></span>Link marginal (belum ada data)</div>
+            <div class="lg" :class="{ dim: !relayActive }"><span class="sw circle" style="background: var(--violet)"></span>Relay{{ lgSuffix(relayActive) }}</div>
+            <div class="lg" :class="{ dim: !baseActive }"><span class="sw circle" style="background: var(--green)"></span>Base{{ lgSuffix(baseActive) }}</div>
+            <div class="lg" :class="{ dim: !linkKuatActive }"><span class="sw line" style="background: var(--green)"></span>Link kuat{{ lgSuffix(linkKuatActive) }}</div>
+            <div class="lg" :class="{ dim: !linkMarginalActive }"><span class="sw line" style="background: var(--amber)"></span>Link marginal{{ lgSuffix(linkMarginalActive) }}</div>
           </div>
         </div>
       </div>
@@ -98,6 +98,7 @@ import { useHikerStore } from "../stores/hikers";
 import { useAlertStore } from "../stores/alerts";
 import SessionsPanel from "./SessionsPanel.vue";
 import { useDiagnosticsStore } from "../stores/diagnostics";
+import { useSiteStore } from "../stores/site";
 import { useUiStore } from "../stores/ui";
 import StartGuide from "./StartGuide.vue";
 import DataPanel from "./DataPanel.vue";
@@ -107,6 +108,7 @@ const alertStore = useAlertStore();
 const collapsed = ref(false);
 const showGuide = ref(false);
 const diagStore = useDiagnosticsStore();
+const siteStore = useSiteStore();
 const uiStore = useUiStore();
 const pdr = computed(() => diagStore.pdrOverall);
 const lat = computed(() => diagStore.latencyMedianS);
@@ -156,8 +158,11 @@ const trendCards = computed(() => [
     points: spark(latVals.value),
     title: "Selisih waktu paket diterima dengan waktu GPS alat, per paket.",
   },
-  { key: "pdr", label: "Paket sampai", value: "—", points: "", title: "" },
-  { key: "margin", label: "Margin", value: "—", points: "", title: "" },
+  {
+    key: "pdr", label: "Paket sampai", value: pdr.value == null ? "—" : `${pdr.value.toFixed(0)}%`,
+    points: "",
+    title: "PDR = persentase paket yang sampai ke base, gabungan semua sesi aktif. Makin tinggi makin baik.",
+  },
 ]);
 
 const latGraph = computed(() => spark(latVals.value, 300, 56, 4));
@@ -171,6 +176,28 @@ const latEmptyText = computed(() =>
     ? "Paket sudah masuk, tetapi belum ada yang membawa waktu GPS valid (tanggal & jam di alat belum tersinkron), jadi tunda data belum bisa dihitung"
     : "Belum ada data telemetri link yang masuk"
 );
+
+// ── Keadaan legenda peta ──
+// Suffix "(belum ada data)" dan class "dim" hanya muncul saat elemen itu BELUM ada di peta.
+// Sumbernya rencana lokasi (siteStore) — sama dengan yang digambar MapView.siteGeo, bukan telemetri paket.
+const baseActive = computed(() => !!siteStore.site?.base || diagStore.baseSet);
+const planRelays = computed(() => siteStore.site?.plan?.relays || []);
+const relayActive = computed(() => planRelays.value.length > 0);
+// Garis link hanya tergambar bila base ter-set DAN ada minimal satu relay (MapView.siteGeo: st?.base && relays.length).
+const linksDrawn = computed(() => baseActive.value && relayActive.value);
+// Klasifikasi kuat vs marginal mengikuti logika MapView.siteGeo: fade_margin_db < ambang params => marginal.
+const fadeThreshold = computed(() => siteStore.site?.params?.fade_margin_db ?? 10);
+const isMarginal = (r) => {
+  if (r.link_ok === false) return false; // link tak-layak dirender merah, bukan marginal
+  if (r.fade_margin_db != null) return r.fade_margin_db < fadeThreshold.value;
+  const loss = r.loss_db ?? (r.margin_m < 3 ? 6 : 0); // rencana lama hanya punya margin
+  return loss > 3;
+};
+const linkKuatActive = computed(() => linksDrawn.value && planRelays.value.some((r) => r.link_ok !== false && !isMarginal(r)));
+const linkMarginalActive = computed(() => linksDrawn.value && planRelays.value.some((r) => isMarginal(r)));
+
+// Legenda: label normal saat aktif, "(belum ada data)" + dim saat belum ada.
+const lgSuffix = (active) => (active ? "" : " (belum ada data)");
 </script>
 
 <style scoped>
