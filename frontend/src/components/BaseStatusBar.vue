@@ -33,7 +33,7 @@
       @click="enableSound"
     ><svg class="bb-spk" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM16 9a4 4 0 0 1 0 6" /></svg>Aktifkan suara alarm</button>
     <button v-else class="bb-btn ok" type="button" title="Suara alarm aktif. Klik untuk mencoba bunyinya." @click="enableSound">
-      <svg class="bb-spk" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>Suara alarm aktif
+      <svg class="bb-spk" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>Alarm aktif
     </button>
 
     <!-- pemilih port -->
@@ -204,30 +204,30 @@ async function choose(port) {
 /* bilah status: menempel di pojok kiri-bawah peta */
 .base-bar {
   bottom: var(--edge); left: calc(var(--lw) + 2 * var(--edge)); right: auto; margin: 0; width: fit-content; max-width: calc(100vw - var(--lw) - var(--rw) - 4 * var(--edge)); z-index: 30;
-  display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start; gap: 8px 14px;
-  padding: 8px 14px; border-radius: 0 var(--rs) 0 var(--radius); font-size: 13px; border-color: var(--line); border-left: 0; border-bottom: 0;
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-start; gap: 4px 8px;
+  padding: 4px 8px; border-radius: 0 var(--rs) 0 var(--radius); font-size: 12px; border-color: var(--line); border-left: 0; border-bottom: 0;
   background: var(--panel-2);
 }
-.bb-status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 4px; font-weight: 700; border: 1px solid transparent; border-radius: 8px; }
-.bb-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.bb-status { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; font-weight: 700; border: 1px solid transparent; border-radius: 6px; }
+.bb-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
 .bb-status.ok { color: var(--green); }
 .bb-status.ok .bb-dot { background: var(--green); }
 .bb-status.warn { color: var(--text); }
 .bb-status.warn .bb-dot { background: var(--amber); }
 /* Kegagalan koneksi base (terputus/USB/tak terjangkau) = PERINGATAN operasional, bukan SOS.
    Pakai amber, bukan merah (merah = SOS saja). Tetap menonjol dengan latar penuh + ikon. */
-.bb-status.bad { background: var(--amber); color: var(--on-amber); padding: 4px 12px; }
+.bb-status.bad { background: var(--amber); color: var(--on-amber); padding: 2px 8px; }
 .bb-status.bad .bb-dot { background: var(--on-amber); }
 .bb-status.off { color: var(--text-2); }
 .bb-icon { display: none; }
-.bb-port { font-weight: 600; opacity: 0.9; font-size: 12px; }
-.bb-last { color: var(--text-2); font-size: 12px; line-height: 1.25; max-width: 130px; }
+.bb-port { font-weight: 600; opacity: 0.9; font-size: 11px; }
+.bb-last { color: var(--text-2); font-size: 11px; line-height: 1.2; white-space: nowrap; }
 .bb-sep { display: none; }
 .bb-btn {
-  min-height: 34px; padding: 4px 14px; border-radius: 8px; border: 1px solid var(--blue-fg); background: transparent;
-  color: var(--blue-fg); font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 26px; padding: 2px 9px; border-radius: 6px; border: 1px solid var(--blue-fg); background: transparent;
+  color: var(--blue-fg); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; gap: 5px;
 }
-.bb-spk { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.bb-spk { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .bb-btn:hover:not(:disabled) { background: var(--blue-glow); }
 .bb-btn:disabled { opacity: 0.5; cursor: wait; }
 .bb-btn.attn { background: var(--accent-glow); border-color: var(--accent); }
@@ -239,19 +239,20 @@ async function choose(port) {
 .bb-btn.ok { color: var(--green); border-color: var(--green); }
 .bb-btn.ok:hover:not(:disabled) { background: var(--green-bg); }
 .bb-pop {
-  position: absolute; bottom: calc(100% + 8px); left: 0; width: min(92vw, 400px);
-  background: var(--panel-2); border: 1px solid var(--line-3); border-radius: var(--rs); padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  position: absolute; bottom: calc(100% + 6px); left: 0; width: min(92vw, 360px);
+  max-height: min(60vh, 340px); overflow-y: auto; z-index: 31;
+  background: var(--panel-2); border: 1px solid var(--line-3); border-radius: var(--rs); padding: 10px; display: flex; flex-direction: column; gap: 7px;
   box-shadow: var(--shadow-pop); text-align: left;
 }
-.bb-pop-h { display: flex; justify-content: space-between; align-items: center; font-size: 15px; }
-.bb-x { background: none; border: none; color: var(--text-2); font-size: 18px; cursor: pointer; padding: 2px 8px; }
-.bb-hint { font-size: 13px; color: var(--text-2); line-height: 1.5; }
-.bb-opt { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; font-size: 14px; line-height: 1.4; }
+.bb-pop-h { display: flex; justify-content: space-between; align-items: center; font-size: 13px; position: sticky; top: 0; background: var(--panel-2); }
+.bb-x { background: none; border: none; color: var(--text-2); font-size: 16px; cursor: pointer; padding: 2px 6px; }
+.bb-hint { font-size: 12px; color: var(--text-2); line-height: 1.4; }
+.bb-opt { display: flex; align-items: flex-start; gap: 8px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; cursor: pointer; font-size: 12px; line-height: 1.35; }
 .bb-opt.cur { border-color: var(--blue-fg); background: var(--blue-glow); }
-.bb-opt small { color: var(--text-2); font-size: 13px; }
-.bb-tag { margin-left: 6px; font-size: 12px; font-weight: 700; padding: 1px 8px; border-radius: 6px; border: 1px solid var(--line-3); color: var(--text-2); }
+.bb-opt small { color: var(--text-2); font-size: 11px; }
+.bb-tag { margin-left: 6px; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--line-3); color: var(--text-2); }
 .bb-tag.on { color: var(--green); border-color: var(--green); }
-.bb-empty { font-size: 13px; color: var(--text-2); padding: 6px 2px; }
-.bb-err { font-size: 13px; color: var(--text); background: var(--amber-glow); border: 1px solid var(--amber); border-radius: 8px; padding: 8px 10px; }
+.bb-empty { font-size: 12px; color: var(--text-2); padding: 6px 2px; }
+.bb-err { font-size: 12px; color: var(--text); background: var(--amber-glow); border: 1px solid var(--amber); border-radius: 8px; padding: 7px 9px; }
 @media (max-width: 1100px) { .base-bar { position: fixed; left: 8px; right: 8px; bottom: 8px; border: 1px solid var(--line); border-radius: var(--rs); max-width: none; } }
 </style>

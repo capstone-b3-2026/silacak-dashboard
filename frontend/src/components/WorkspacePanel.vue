@@ -158,11 +158,9 @@ const trendCards = computed(() => [
     points: spark(latVals.value),
     title: "Selisih waktu paket diterima dengan waktu GPS alat, per paket.",
   },
-  {
-    key: "pdr", label: "Paket sampai", value: pdr.value == null ? "—" : `${pdr.value.toFixed(0)}%`,
-    points: "",
-    title: "PDR = persentase paket yang sampai ke base, gabungan semua sesi aktif. Makin tinggi makin baik.",
-  },
+  // Kartu PDR ("Paket sampai") dihapus dari sini: nilainya identik dengan kartu PDR di
+  // section Ringkasan (sama-sama diagStore.pdrOverall) dan PDR bukan deret rolling, jadi
+  // sparkline selalu kosong (garis datar). Angka PDR tetap tampil di Ringkasan.
 ]);
 
 const latGraph = computed(() => spark(latVals.value, 300, 56, 4));
