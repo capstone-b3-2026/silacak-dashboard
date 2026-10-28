@@ -127,14 +127,19 @@ def install_console_close_handler(on_close) -> None:
 
 
 def open_window(url: str) -> None:
-    """Edge --app = jendela tanpa address bar (terasa seperti aplikasi, tanpa Electron). Fallback: browser bawaan."""
+    """Edge --app = jendela tanpa address bar (terasa seperti aplikasi, tanpa Electron). Fallback: browser bawaan.
+
+    --start-fullscreen menyembunyikan title bar supaya terasa seperti aplikasi native (seperti menekan F11).
+    Ini BUKAN borderless sejati: operator tetap bisa keluar dengan F11 atau menutup dengan Alt+F4. Title bar
+    yang benar-benar hilang (custom titlebar) butuh Electron/Tauri, tidak sepadan dan menambah dependensi besar.
+    Bukan --kiosk: kiosk terlalu mengunci untuk laptop operator (tidak bisa keluar dengan mudah)."""
     if os.name == "nt":
         for edge in (shutil.which("msedge"),
                      r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
                      r"C:\Program Files\Microsoft\Edge\Application\msedge.exe"):
             if edge and os.path.exists(edge):
                 try:
-                    subprocess.Popen([edge, f"--app={url}"])
+                    subprocess.Popen([edge, f"--app={url}", "--start-fullscreen"])
                     return
                 except OSError:
                     break

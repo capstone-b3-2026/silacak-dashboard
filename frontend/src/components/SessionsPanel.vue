@@ -52,13 +52,17 @@
       <!-- form check-in -->
       <form class="sess-form" @submit.prevent="submit">
         <div class="sess-ft">Check-in pendaki</div>
-        <input v-model="form.hiker_code" list="alat-list" placeholder="Kode alat (mis. H01)" required maxlength="20" />
-        <datalist id="alat-list"><option v-for="c in deviceCodes" :key="c" :value="c" /></datalist>
+        <!-- Pilih alat dari daftar perangkat terdaftar (anti salah ketik). Operator cukup memilih, tidak mengetik kode. -->
+        <p v-if="!availableDevices.length" class="sess-hint">Belum ada alat terdaftar - tambahkan di Setup &gt; Perangkat.</p>
+        <select v-else v-model="form.hiker_code" required>
+          <option value="" disabled>Pilih alat...</option>
+          <option v-for="d in availableDevices" :key="d.hiker_code" :value="d.hiker_code">{{ d.hiker_code }} - {{ d.name }}</option>
+        </select>
         <input v-model="form.full_name" placeholder="Nama pendaki" required />
         <input v-model="form.emergency_contact" placeholder="Kontak darurat (opsional)" />
         <input v-model="form.trail_name" placeholder="Jalur (opsional)" />
         <div v-if="error" class="sess-err">{{ error }}</div>
-        <button class="ack-btn" style="width: 100%" :disabled="busy">{{ busy ? "..." : "Mulai sesi" }}</button>
+        <button class="ack-btn" style="width: 100%" :disabled="busy || !availableDevices.length">{{ busy ? "..." : "Mulai sesi" }}</button>
       </form>
       </div>
     </div>
@@ -67,10 +71,12 @@
 
 <script setup>
 import { computed, onMounted, reactive, ref } from "vue";
-import { fetchHikers, sessionCsvUrl, sessionGpxUrl } from "../services/api";
+import { sessionCsvUrl, sessionGpxUrl } from "../services/api";
 import { useSessionStore } from "../stores/sessions";
+import { useDeviceStore } from "../stores/devices";
 
 const store = useSessionStore();
+const deviceStore = useDeviceStore();
 const open = ref(localStorage.getItem("silacak.sessOpen") !== "0"); // default terbuka: check-in adalah tugas harian operator
 function toggle() {
   open.value = !open.value;
@@ -79,22 +85,19 @@ function toggle() {
 const showHistory = ref(false);
 const busy = ref(false);
 const error = ref("");
-const knownCodes = ref([]);
 const form = reactive({ hiker_code: "", full_name: "", emergency_contact: "", trail_name: "" });
 
 const list = computed(() => (showHistory.value ? store.history : store.active));
-// saran kode alat: yang sudah dikenal sistem, kecuali yang sedang dipakai pendaki terdaftar
-const deviceCodes = computed(() => {
+// Alat yang bisa dipilih untuk check-in: perangkat terdaftar role 'tracker' (punya hiker_code),
+// kecuali yang sedang dipakai pendaki terdaftar (sesi aktif non auto_opened). Anti salah ketik.
+const availableDevices = computed(() => {
   const busyCodes = new Set(store.active.filter((s) => !s.auto_opened).map((s) => s.hiker_code));
-  return knownCodes.value.filter((c) => !busyCodes.has(c));
+  return deviceStore.devices.filter((d) => d.role === "tracker" && d.hiker_code && !busyCodes.has(d.hiker_code));
 });
 
-onMounted(async () => {
-  try {
-    knownCodes.value = (await fetchHikers()).map((h) => h.hiker_code);
-  } catch (e) {
-    /* saran kode alat saja yang hilang; form tetap bisa diketik manual */
-  }
+onMounted(() => {
+  // refresh() = muat sekali tanpa polling; daftar alat jarang berubah saat operator check-in.
+  deviceStore.refresh();
 });
 
 function fmt(iso) {
@@ -103,7 +106,8 @@ function fmt(iso) {
 function fillFor(code) {
   open.value = true;
   form.hiker_code = code;
-  document.querySelector(".sess-form input:nth-of-type(2)")?.focus();
+  // kode alat sudah terisi dari banner "belum check-in"; fokuskan ke "Nama pendaki" (input teks pertama).
+  document.querySelector(".sess-form input")?.focus();
 }
 async function openHistory() {
   showHistory.value = true;
@@ -163,7 +167,10 @@ async function doCheckOut(s) {
 .mini.warn { color: var(--amber); border-color: var(--amber); }
 .sess-form { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .sess-ft { font-size: 13px; font-weight: 700; color: var(--text); }
-.sess-form input { height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text); padding: 0 10px; font-size: 14px; font-family: inherit; }
-.sess-form input:focus { outline: none; border-color: var(--accent); }
+.sess-form input,
+.sess-form select { height: 36px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel-3); color: var(--text); padding: 0 10px; font-size: 14px; font-family: inherit; }
+.sess-form input:focus,
+.sess-form select:focus { outline: none; border-color: var(--accent); }
+.sess-hint { margin: 0; font-size: 13px; color: var(--text-2); }
 .sess-err { color: var(--red); font-size: 13px; }
 </style>
