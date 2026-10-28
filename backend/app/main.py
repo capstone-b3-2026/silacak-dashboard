@@ -95,7 +95,9 @@ async def on_shutdown() -> None:
     await database.disconnect_db()
 
 
-_WIZARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "wizard.html")
+_STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")
+_WIZARD = os.path.join(_STATIC_DIR, "wizard.html")
+_WIZARD_LOGO = os.path.join(_STATIC_DIR, "LOGO.png")
 
 
 @app.get("/awal", include_in_schema=False)
@@ -103,6 +105,13 @@ _WIZARD = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "wi
 async def wizard_page():
     """Halaman pengaturan awal (HTML mandiri, tidak butuh build frontend). Harus di atas catch-all SPA."""
     return FileResponse(_WIZARD, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/awal-logo.png", include_in_schema=False)
+async def wizard_logo():
+    """Logo untuk halaman wizard. Disajikan dari backend/app/static supaya tetap tampil
+    pada first run meski dashboard hasil build (FRONTEND_DIR) belum di-mount."""
+    return FileResponse(_WIZARD_LOGO, headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/health")
