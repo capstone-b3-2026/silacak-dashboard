@@ -15,7 +15,7 @@ from app.core import database
 from app.core.schema import ensure_schema
 from app.core.config import settings
 from app.core.scheduler import scheduler, start_scheduler
-from app.services import app_settings, sos_watch
+from app.services import app_settings, sos_watch, off_trail_watch
 from app.services.notifier import notifier
 from app.services.serial_ingest import serial_ingest
 
@@ -60,6 +60,7 @@ def _on_position_notify(connection, pid, channel, payload: str) -> None:
     data = json.loads(payload)
     asyncio.create_task(notifier.broadcast(json.dumps({"type": "position", "data": data})))
     asyncio.create_task(sos_watch.handle_position(data))  # tombol SOS pendaki -> alarm MANUAL_SOS (jalur apa pun)
+    asyncio.create_task(off_trail_watch.handle_position(data))  # keluar perimeter -> peringatan OFF_TRAIL (amber)
 
 
 @app.on_event("startup")

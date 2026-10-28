@@ -1,24 +1,37 @@
 <template>
   <div class="sos-stack">
-    <div v-if="alertStore.alerts.length" class="sos-pill" role="status">
+    <div v-if="sosAlerts.length" class="sos-pill" role="status">
       <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" /><path d="M12 7v6M12 16.5h.01" /></svg>
-      {{ alertStore.alerts.length }} alarm SOS perlu ditangani
+      {{ sosAlerts.length }} alarm SOS perlu ditangani
     </div>
-    <button v-if="alertStore.alerts.length > 1" class="sos-ack-all" @click="acknowledgeAll">
-      Tandai semua sudah ditangani ({{ alertStore.alerts.length }})
+    <button v-if="sosAlerts.length > 1" class="sos-ack-all" @click="acknowledgeAll">
+      Tandai semua sudah ditangani ({{ sosAlerts.length }})
     </button>
     <!-- suara diblokir browser: alarm tampil visual saja sampai tombol ini ditekan -->
     <button v-if="alarmActive && !sound.enabled" class="sos-sound" @click="enableSound">
       Suara alarm diblokir browser. Klik di sini untuk mengaktifkan
     </button>
     <transition-group name="drop" tag="div" class="sos-list">
-      <div v-for="a in alertStore.alerts" :key="a.id" class="sos-card" role="alert">
+      <div v-for="a in sosAlerts" :key="a.id" class="sos-card" role="alert">
         <span class="sos-icon">SOS</span>
         <div class="sos-text">
           <strong>{{ a.hiker_code || "?" }} — SOS</strong>
           <span>{{ alertLabel(a.alert_type) }} · {{ fmtTime(a.triggered_at) }}</span>
         </div>
         <button class="sos-ack" @click="alertStore.acknowledge(a.id)">Sudah ditangani</button>
+      </div>
+    </transition-group>
+
+    <!-- "di luar jalur" (OFF_TRAIL): peringatan AMBER, bukan SOS merah, dan TIDAK bisa disenyapkan manual
+         (hilang sendiri saat pendaki kembali masuk perimeter). Ditampilkan seperti kartu "tidak terdengar". -->
+    <transition-group name="drop" tag="div" class="sos-list">
+      <div v-for="a in offTrailAlerts" :key="`offtrail-${a.id}`" class="sos-card warn" role="alert">
+        <span class="sos-icon">Jalur</span>
+        <div class="sos-text">
+          <strong>{{ a.hiker_code || "?" }} — di luar jalur</strong>
+          <span>Keluar perimeter<template v-if="a.meta?.dist_to_trail_m != null"> · {{ Math.round(a.meta.dist_to_trail_m) }} m dari jalur</template>. Pantau dan hubungi pendaki.</span>
+        </div>
+        <button class="sos-ack" @click="hikerStore.selectHiker(a.hiker_code)">Lihat</button>
       </div>
     </transition-group>
 
@@ -60,6 +73,10 @@ import { alertLabel } from "../utils/alerts";
 const alertStore = useAlertStore();
 const hikerStore = useHikerStore();
 const diagStore = useDiagnosticsStore();
+// Hanya alarm SOS (merah) yang memicu pil/kartu merah, bunyi, dan notifikasi. OFF_TRAIL (amber) dipisah:
+// merah = SOS saja (lihat .kiro/steering/conventions.md). OFF_TRAIL tampil amber, tanpa bunyi SOS.
+const sosAlerts = computed(() => alertStore.alerts.filter((a) => a.alert_type !== "OFF_TRAIL"));
+const offTrailAlerts = computed(() => alertStore.alerts.filter((a) => a.alert_type === "OFF_TRAIL"));
 function fmtTime(ts) {
   if (!ts) return "—";
   return new Date(ts).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" });
@@ -99,7 +116,7 @@ function stopRepeat() {
   repeatTimer = null;
 }
 function repeatAlarm() {
-  const pending = alertStore.alerts;
+  const pending = sosAlerts.value;
   if (!pending.length) {
     stopRepeat();
     return;
@@ -118,7 +135,7 @@ function startRepeat() {
 // operator tidak melewatkan SOS yang belum ditangani, tapi tidak membunyikan alarm / notifikasi browser.
 // Sebelumnya knownIds kosong saat muat awal, sehingga semua alarm lama dianggap "baru" -> bunyi + notifikasi.
 watch(
-  () => alertStore.alerts,
+  sosAlerts,
   (alerts) => {
     let fresh = false;
     for (const a of alerts) {
@@ -197,7 +214,8 @@ watch(
 );
 
 function acknowledgeAll() {
-  [...alertStore.alerts].forEach((a) => alertStore.acknowledge(a.id));
+  // Hanya alarm SOS yang bisa di-"tandai ditangani". OFF_TRAIL tidak pernah disenyapkan manual.
+  [...sosAlerts.value].forEach((a) => alertStore.acknowledge(a.id));
 }
 </script>
 

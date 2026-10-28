@@ -50,3 +50,18 @@ async def list_active_alerts(conn):
 
 async def acknowledge_alert(conn, alert_id: int):
     await conn.execute("UPDATE alerts SET status = 'ACKNOWLEDGED' WHERE id = $1", alert_id)
+
+
+async def resolve_off_trail(conn, session_id: int):
+    """Tandai SELESAI alarm OFF_TRAIL yang masih ACTIVE untuk sesi ini (pendaki kembali ke dalam perimeter).
+    OFF_TRAIL hilang otomatis saat kembali masuk - BUKAN disenyapkan manual seperti SOS/stagnant.
+    Kembalikan dict baris yang berubah (supaya pemanggil tahu perlu broadcast), atau None bila tidak ada."""
+    row = await conn.fetchrow(
+        """
+        UPDATE alerts SET status = 'RESOLVED', resolved_at = now()
+        WHERE session_id = $1 AND alert_type = 'OFF_TRAIL' AND status = 'ACTIVE'
+        RETURNING id, session_id
+        """,
+        session_id,
+    )
+    return dict(row) if row else None

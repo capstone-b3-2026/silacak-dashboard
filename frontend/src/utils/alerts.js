@@ -3,6 +3,7 @@ const LABELS = {
   STAGNANT: "diam di tempat",
   MANUAL_SOS: "SOS manual",
   LOW_BATTERY: "baterai kritis",
+  OFF_TRAIL: "di luar jalur",
 };
 
 export function alertLabel(type) {

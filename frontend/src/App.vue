@@ -14,9 +14,9 @@
           <svg v-else viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
           <svg class="tb-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6" /></svg>
         </button>
-        <span class="tb-ic static" role="img" :aria-label="alertStore.alerts.length ? `${alertStore.alerts.length} alarm SOS aktif` : 'Tidak ada alarm SOS'" :title="alertStore.alerts.length ? `${alertStore.alerts.length} alarm SOS aktif` : 'Tidak ada alarm SOS'">
+        <span class="tb-ic static" role="img" :aria-label="sosCount ? `${sosCount} alarm SOS aktif` : 'Tidak ada alarm SOS'" :title="sosCount ? `${sosCount} alarm SOS aktif` : 'Tidak ada alarm SOS'">
           <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" /><path d="M13.7 21a2 2 0 0 1-3.4 0" /></svg>
-          <i v-if="alertStore.alerts.length" class="tb-dot"></i>
+          <i v-if="sosCount" class="tb-dot"></i>
         </span>
       </div>
     </header>
@@ -60,6 +60,8 @@ const logoSrc = computed(() =>
 
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
+// Titik merah lonceng = SOS saja (merah = SOS, disiplin warna). OFF_TRAIL (amber) tidak ikut dihitung di sini.
+const sosCount = computed(() => alertStore.alerts.filter((a) => a.alert_type !== "OFF_TRAIL").length);
 const siteStore = useSiteStore();
 const sessionStore = useSessionStore();
 const diagStore = useDiagnosticsStore();
@@ -95,6 +97,9 @@ useLiveStream((message) => {
     }
   } else if (message.type === "alert") {
     alertStore.addAlert(message.data);
+  } else if (message.type === "alert_resolved") {
+    // Backend menyelesaikan alarm otomatis (mis. OFF_TRAIL saat pendaki kembali masuk perimeter).
+    alertStore.resolveById(message.data.id);
   } else if (message.type === "session") {
     sessionStore.applyEvent(message.event, message.data);
     if (message.event === "closed") {
