@@ -4,7 +4,7 @@ import { fetchDiagnostics, fetchPackets } from "../services/api";
 // Diagnostik link per sesi aktif (PDR, latency, node basi, jarak ke base) + packet log pendaki terpilih.
 // Polling ringan: dashboard lokal, dan indikator "basi" memang perlu dihitung ulang berkala.
 export const useDiagnosticsStore = defineStore("diagnostics", {
-  state: () => ({ sessions: {}, staleAfterS: 120, baseSet: false, packets: [], packetsFor: null }),
+  state: () => ({ sessions: {}, staleAfterS: 120, baseSet: false, packets: [], packetsFor: null, trend: [], trendFor: null }),
   getters: {
     list: (s) => Object.values(s.sessions).sort((a, b) => a.hiker_code.localeCompare(b.hiker_code)),
     // PDR gabungan semua sesi aktif: total diterima / (diterima + hilang), paket pertama tiap sesi = jangkar.
@@ -28,8 +28,14 @@ export const useDiagnosticsStore = defineStore("diagnostics", {
         if (selectedCode) {
           this.packets = await fetchPackets(selectedCode);
           this.packetsFor = selectedCode;
+          this.trend = this.packets;
+          this.trendFor = selectedCode;
         } else {
           this.packets = [];
+          // Tren sinyal & tunda data di Ruang Kerja tetap terisi walau belum ada pendaki dipilih (pakai pendaki aktif pertama).
+          const code = this.list[0]?.hiker_code ?? null;
+          this.trend = code ? await fetchPackets(code, 60) : [];
+          this.trendFor = code;
         }
       } catch (e) {
         /* backend sedang restart: coba lagi di tick berikutnya */

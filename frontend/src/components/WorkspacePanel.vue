@@ -45,20 +45,18 @@
 
       <DataPanel v-if="uiStore.advanced" />
 
-      <!--
-        Kartu di bawah ini (signal trend, latency timeline, RF params)
-        masih placeholder murni - backend belum punya tabel/endpoint buat
-        telemetry per-link (SNR, margin, PDR, latency, cuaca, SF/ToA).
-        Struktur & class-nya udah final, tinggal isi datanya nanti.
-      -->
+      <!-- Tren sinyal: RSSI & tunda data diambil dari log paket pendaki terpilih (diagStore.trend, diperbarui tiap 5 dtk) -->
       <div v-if="uiStore.advanced" class="pnl">
-        <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6" /></svg>Tren sinyal</div><div class="sv">Menunggu data</div></div>
+        <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6" /></svg>Tren sinyal</div><div class="sv">{{ trendLabel }}</div></div>
         <div class="pb">
           <div class="sgrid">
-            <div class="sc" v-for="t in trends" :key="t">
-              <div class="sc-h"><strong>{{ t }}</strong><span>—</span></div>
+            <div class="sc" v-for="c in trendCards" :key="c.key" :title="c.title">
+              <div class="sc-h"><strong>{{ c.label }}</strong><span :style="c.value === '—' ? 'color: var(--muted)' : ''">{{ c.value }}</span></div>
               <div class="sc-w">
-                <svg viewBox="0 0 100 24" preserveAspectRatio="none"><line x1="0" y1="12" x2="100" y2="12" /></svg>
+                <svg viewBox="0 0 100 24" preserveAspectRatio="none">
+                  <polyline v-if="c.points" :points="c.points" class="sp" :class="c.cls" />
+                  <line v-else x1="0" y1="12" x2="100" y2="12" />
+                </svg>
               </div>
             </div>
           </div>
@@ -69,19 +67,17 @@
         <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>Tunda data (latency)</div><div class="sv">{{ latText }}</div></div>
         <div class="pb" style="padding-bottom: 8px">
           <div class="ekg-c">
-            <div class="ekg-h"><strong>Grafik berjalan</strong><span>—</span></div>
-            <div class="ekg-w">Belum ada data telemetri link yang masuk</div>
+            <div class="ekg-h"><strong>Grafik berjalan</strong><span>{{ latRangeText }}</span></div>
+            <svg v-if="latGraph" class="ekg-svg" viewBox="0 0 300 56" preserveAspectRatio="none"><polyline :points="latGraph" class="sp lat" /></svg>
+            <div v-else class="ekg-w">{{ latEmptyText }}</div>
           </div>
         </div>
       </div>
 
+      <!-- legenda peta (dulu satu kartu dengan "Parameter radio"; kartu parameter radio sudah dihapus) -->
       <div v-if="uiStore.advanced" class="pnl">
-        <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0" /><circle cx="12" cy="12" r="1" /></svg>Parameter radio</div><div class="sv">—</div></div>
+        <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></svg>Legenda peta</div></div>
         <div class="pb">
-          <div class="rf-row">
-            <div class="rf-c"><strong>Kondisi cuaca</strong><span>—</span></div>
-            <div class="rf-c"><strong>SF / waktu udara</strong><span>—</span></div>
-          </div>
           <div class="lgnd">
             <div class="lg"><span class="sw circle" style="background: var(--marker)"></span>Pendaki</div>
             <div class="lg"><span class="sw circle" style="background: var(--red)"></span>SOS</div>
@@ -122,5 +118,64 @@ const latTitle = computed(() => lat.value != null && lat.value < 0
 
 const pendakiAktif = computed(() => Object.keys(hikerStore.hikers).length);
 const sosAktif = computed(() => alertStore.alerts.length);
-const trends = ["Paket sampai", "Tunda data", "SNR", "Margin"];
+
+// ── Tren sinyal & tunda data ──
+// Sumber: log paket pendaki terpilih (GET /diagnostics/{kode}/packets, terbaru dulu) yang sudah di-poll diagStore.
+// Dulu kartu ini hanya placeholder statis ("—" + garis datar) dan tidak terhubung ke store mana pun.
+const WINDOW = 60; // jumlah paket terakhir yang digambar
+const series = computed(() => diagStore.trend.slice(0, WINDOW).reverse()); // urut waktu lama -> baru
+const rssiVals = computed(() => series.value.map((p) => p.rssi_dbm).filter((v) => v != null));
+const latVals = computed(() => series.value.map((p) => p.latency_s).filter((v) => v != null));
+const last = (arr) => (arr.length ? arr[arr.length - 1] : null);
+
+// titik polyline dalam kotak W x H; tinggi diskalakan min..max data (data datar -> garis tengah)
+function spark(vals, W = 100, H = 24, pad = 2) {
+  if (!vals.length) return "";
+  if (vals.length === 1) return `0,${H / 2} ${W},${H / 2}`;
+  let lo = Math.min(...vals);
+  let hi = Math.max(...vals);
+  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
+  const n = vals.length;
+  return vals
+    .map((v, i) => `${((i / (n - 1)) * W).toFixed(1)},${(H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad)).toFixed(1)}`)
+    .join(" ");
+}
+const fmtLat = (v) => (v == null ? "—" : v < 0 ? "jam?" : `${v.toFixed(1)} s`);
+
+const trendLabel = computed(() => (diagStore.trendFor ? `${diagStore.trendFor} · ${series.value.length} paket` : "Menunggu data"));
+const trendCards = computed(() => [
+  {
+    key: "rssi", label: "Kekuatan sinyal", cls: "rssi",
+    value: last(rssiVals.value) != null ? `${last(rssiVals.value)} dBm` : "—",
+    points: spark(rssiVals.value),
+    title: "RSSI paket yang diterima base (dBm). Makin mendekati 0 makin kuat; di bawah sekitar −110 dBm hampir putus.",
+  },
+  {
+    key: "lat", label: "Tunda data", cls: "lat",
+    value: fmtLat(last(latVals.value)),
+    points: spark(latVals.value),
+    title: "Selisih waktu paket diterima dengan waktu GPS alat, per paket.",
+  },
+  { key: "pdr", label: "Paket sampai", value: "—", points: "", title: "" },
+  { key: "margin", label: "Margin", value: "—", points: "", title: "" },
+]);
+
+const latGraph = computed(() => spark(latVals.value, 300, 56, 4));
+const latRangeText = computed(() => {
+  if (!latVals.value.length) return "—";
+  const lo = Math.min(...latVals.value), hi = Math.max(...latVals.value);
+  return `${lo.toFixed(1)}–${hi.toFixed(1)} s · ${latVals.value.length} paket`;
+});
+const latEmptyText = computed(() =>
+  diagStore.trend.length
+    ? "Paket sudah masuk, tetapi belum ada yang membawa waktu GPS valid (tanggal & jam di alat belum tersinkron), jadi tunda data belum bisa dihitung"
+    : "Belum ada data telemetri link yang masuk"
+);
 </script>
+
+<style scoped>
+.sp { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.sp.rssi { stroke: var(--blue-fg); }
+.sp.lat { stroke: var(--accent); }
+.ekg-svg { width: 100%; height: 56px; display: block; }
+</style>

@@ -85,7 +85,31 @@ function notifyBrowser(alert) {
   new Notification("SOS AKTIF", {
     body: `${alert.hiker_code || "?"} — ${alertLabel(alert.alert_type)}`,
     requireInteraction: true,
+    tag: `sos-${alert.id}`, // tag sama + renotify: pengulangan tetap berbunyi/muncul lagi, bukan diam-diam menimpa
+    renotify: true,
   });
+}
+
+// Alarm SOS yang belum ditangani diulang tiap 5 menit (bunyi + notifikasi browser) sampai di-dismiss/ditandai
+// ditangani, atau sampai SOS dibatalkan dari alat (kartu hilang). Begitu daftar kosong, pengulangan berhenti.
+const REPEAT_MS = 5 * 60 * 1000;
+let repeatTimer = null;
+function stopRepeat() {
+  if (repeatTimer) clearInterval(repeatTimer);
+  repeatTimer = null;
+}
+function repeatAlarm() {
+  const pending = alertStore.alerts;
+  if (!pending.length) {
+    stopRepeat();
+    return;
+  }
+  beep();
+  pending.forEach(notifyBrowser);
+}
+function startRepeat() {
+  stopRepeat();
+  repeatTimer = setInterval(repeatAlarm, REPEAT_MS);
 }
 
 // Trigger beep + notifikasi HANYA buat alert yang BENERAN baru terjadi (ditandai _live oleh alertStore:
@@ -96,13 +120,18 @@ function notifyBrowser(alert) {
 watch(
   () => alertStore.alerts,
   (alerts) => {
+    let fresh = false;
     for (const a of alerts) {
       if (!knownIds.has(a.id) && a._live) {
         beep();
         notifyBrowser(a);
+        fresh = true;
       }
     }
     knownIds = new Set(alerts.map((a) => a.id));
+    // ada alarm belum ditangani -> jaga timer 5 menit (diulang dari nol saat ada SOS baru); kosong -> hentikan
+    if (!alerts.length) stopRepeat();
+    else if (fresh || !repeatTimer) startRepeat();
   },
   { deep: true, immediate: true }
 );
@@ -114,7 +143,17 @@ let syncTimer = null;
 onMounted(() => {
   syncTimer = setInterval(() => alertStore.sync(), 10000);
 });
-onBeforeUnmount(() => clearInterval(syncTimer));
+onBeforeUnmount(() => {
+  clearInterval(syncTimer);
+  stopRepeat();
+});
+
+// SOS dibatalkan dari alat (payload posisi terbaru sos=false) -> kartu SOS di dashboard otomatis hilang.
+watch(
+  [() => hikerStore.hikers, () => alertStore.alerts.length],
+  () => alertStore.cancelBySosFlag(hikerStore.hikers),
+  { deep: true }
+);
 
 // ── alarm "node tidak terdengar" & "baterai rendah" (turunan dari data yang sudah ada) ──
 const muted = reactive({}); // kode alat -> true = disenyapkan sampai terdengar lagi

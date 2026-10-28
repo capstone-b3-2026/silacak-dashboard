@@ -49,10 +49,6 @@
                 <div class="selc-cell sm" title="Kekuatan sinyal radio yang diterima base (RSSI). Makin mendekati 0 dBm makin kuat; di bawah sekitar −110 dBm hampir putus."><strong>{{ selected.rssi_dbm != null ? `${selected.rssi_dbm} dBm` : "—" }}</strong><span>Kekuatan sinyal</span></div>
                 <div class="selc-cell sm" title="Jumlah relay yang dilewati paket sebelum sampai ke base (hop). Langsung = tanpa relay."><strong>{{ hopText(selected.hop_count) }}</strong><span>Lewat relay</span></div>
                 <div class="selc-cell sm" title="Jumlah satelit GPS / ketelitian GPS (HDOP). HDOP makin kecil makin teliti; di atas 5 dianggap tidak valid."><strong>{{ selected.satellites ?? "—" }} / {{ selected.hdop ?? "—" }}</strong><span>Satelit / ketelitian GPS</span></div>
-                <template v-if="uiStore.advanced">
-                  <div class="selc-cell sm"><strong class="placeholder">—</strong><span>Cuaca</span></div>
-                  <div class="selc-cell sm"><strong class="placeholder">—</strong><span>Kontrol</span></div>
-                </template>
                 <div class="selc-cell sm"><strong>{{ selSosCount }}</strong><span>Jumlah SOS</span></div>
               </div>
             </div>
@@ -242,6 +238,8 @@ function fmtTime(ts) {
 </script>
 
 <style scoped>
+/* Cuaca & Kontrol dihapus -> sisa 4 sel (sinyal, relay, satelit, jumlah SOS) ditata 2x2 agar rapat tanpa sel yatim */
+.selc-grid.secondary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sosev .ack-btn { background: var(--red); color: #fff; }
 .sosev .ack-btn:hover:not(:disabled) { background: var(--red); filter: brightness(0.92); }
 </style>

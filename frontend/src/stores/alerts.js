@@ -5,6 +5,14 @@ import { acknowledgeAlert, fetchAlerts } from "../services/api";
 // perjalanan (diminta sebelum tombol ditekan) memunculkan lagi alarm tersebut + bunyi ulang.
 const acked = new Set();
 
+// Waktu dari server -> epoch ms. SSE mengirim "2026-10-27 10:00:00.123456+00:00" (spasi, 6 digit pecahan),
+// REST mengirim ISO. Dinormalkan dulu supaya terbaca di semua browser; null bila tidak terbaca.
+function toMs(v) {
+  if (!v) return null;
+  const t = Date.parse(String(v).replace(" ", "T").replace(/(\.\d{3})\d+/, "$1"));
+  return Number.isNaN(t) ? null : t;
+}
+
 export const useAlertStore = defineStore("alerts", {
   state: () => ({
     alerts: [],
@@ -44,6 +52,25 @@ export const useAlertStore = defineStore("alerts", {
     },
     removeBySession(sessionId) {
       this.alerts = this.alerts.filter((a) => a.session_id !== sessionId);
+    },
+    // SOS dibatalkan dari alat: payload posisi TERBARU pendaki membawa sos=false -> kartu SOS otomatis hilang.
+    // Hanya alarm MANUAL_SOS (yang dipicu tombol SOS) yang ikut, dan hanya oleh paket yang DITERIMA SETELAH
+    // alarm dibuat (paket telat/lama tidak boleh membatalkan SOS baru). Kalau waktu tidak terbaca -> alarm
+    // dibiarkan tampil (aman). Server ikut ditandai ACKNOWLEDGED supaya sync 10 detik tidak memunculkannya lagi
+    // dan tekanan SOS berikutnya dibuatkan alarm baru oleh backend.
+    cancelBySosFlag(hikers) {
+      for (const a of [...this.alerts]) {
+        if (a.alert_type !== "MANUAL_SOS") continue;
+        const h = hikers?.[a.hiker_code];
+        if (!h || !("sos" in h) || h.sos) continue; // belum ada paket live, atau SOS masih menyala
+        if (a.session_id != null && h.session_id != null && a.session_id !== h.session_id) continue;
+        const sentAt = toMs(h.received_at);
+        const raisedAt = toMs(a.triggered_at);
+        if (sentAt == null || raisedAt == null || sentAt <= raisedAt) continue;
+        acked.add(a.id);
+        this.alerts = this.alerts.filter((x) => x.id !== a.id);
+        acknowledgeAlert(a.id).catch(() => {});
+      }
     },
     async acknowledge(alertId) {
       acked.add(alertId);
