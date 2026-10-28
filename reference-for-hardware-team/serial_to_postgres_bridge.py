@@ -267,7 +267,7 @@ async def handle_timing(pool: asyncpg.Pool, raw: str) -> None:
 # di bawah adalah USULAN - firmware base harus dibuat mengerti format ini (atau
 # sesuaikan build_cfg_line() dengan format perintah yang sudah ada di firmware).
 #
-#   CFG,<node_id>,<name>,<role>,<report_interval_s>,<tx_power_dbm>,<sf>,<version>
+#   CFG,<node_id>,<name>,<role>,<report_interval_s>,<tx_power_dbm>,<air_data_rate_kbps>,<version>
 #
 # Kalau firmware membalas "CFG_ACK,<node_id>,<version>" -> status 'acked'.
 # Kalau firmware belum punya ACK, jalankan dengan --no-ack: begitu baris ditulis,
@@ -280,7 +280,7 @@ def build_cfg_line(p: dict) -> str:
     name = str(p["name"]).replace(",", " ")
     return (
         f"CFG,{p['node_id']},{name},{p['role']},{c['report_interval_s']},"
-        f"{c['tx_power_dbm']},{c['sf']},{p['version']}\n"
+        f"{c['tx_power_dbm']},{c['air_data_rate']},{p['version']}\n"
     )
 
 

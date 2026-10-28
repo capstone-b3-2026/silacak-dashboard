@@ -186,7 +186,7 @@
               <span class="chip" :class="syncClass(d)">{{ syncLabel(d) }}</span>
             </div>
             <div class="dev-cfg">
-              lapor {{ d.config.report_interval_s }} dtk · TX {{ d.config.tx_power_dbm }} dBm · SF{{ d.config.sf }}
+              lapor {{ d.config.report_interval_s }} dtk · TX {{ d.config.tx_power_dbm }} dBm · {{ d.config.air_data_rate }} kbps
             </div>
             <div v-if="d.role === 'relay'" class="dev-slot">
               <span class="lbl">Dipasang di posisi</span>
@@ -223,7 +223,11 @@
           <label class="wide"><span class="lbl">Nama</span><input class="inp" v-model="form.name" placeholder="mis. Tracker Andi" /></label>
           <label><span class="lbl">Interval lapor (dtk)<ParamTip>Selang node mengirim posisi. MISMATCH: firmware _optimized mengirim kontinu (jeda minimum 300 ms), _real tiap 5000 ms; angka '30 dtk' TIDAK ada di firmware. Lagipula downlink konfigurasi belum dimengerti firmware, jadi nilai ini BELUM sampai ke alat.</ParamTip></span><input class="inp" type="number" v-model.number="form.config.report_interval_s" /></label>
           <label><span class="lbl">TX power (dBm)<ParamTip>Daya pancar node. MISMATCH: alat memakai POWER_22 = 22 dBm hardcoded; batas form ini (2–20) bahkan tak bisa mencapai 22. Downlink konfigurasi belum jalan, jadi nilai ini BELUM mengubah alat.</ParamTip></span><input class="inp" type="number" v-model.number="form.config.tx_power_dbm" /></label>
-          <label><span class="lbl">Spreading factor<ParamTip>Tukar jangkauan vs kecepatan. MISMATCH: firmware menyetel AIR_DATA_RATE_010_24 (2,4 kbps E220), bukan angka SF numerik; padanan 'SF9 = 2,4 kbps' adalah ASUMSI, bukan fakta datasheet. Nilai sf ini saat ini hanya katalog dashboard.</ParamTip></span><input class="inp" type="number" min="5" max="11" v-model.number="form.config.sf" /></label>
+          <label><span class="lbl">Air data rate<ParamTip>Laju data radio gabungan modul E220. Pada E220 (chip LLCC68), SF, bandwidth, dan coding rate TIDAK bisa diatur terpisah — hanya satu setelan air data rate. Firmware saat ini memakai 2,4 kbps (AIR_DATA_RATE_010_24); nilai lebih rendah = jangkauan/ketahanan lebih baik tetapi lebih lambat. C-251 §2.2.1 membahas SF5–SF11 sebagai konsep simulasi, bukan knob terpisah di modul ini. MISMATCH: downlink konfigurasi belum dimengerti firmware, jadi nilai ini masih katalog dashboard dan BELUM sampai ke alat.</ParamTip></span>
+            <select class="inp" v-model.number="form.config.air_data_rate">
+              <option v-for="r in AIR_DATA_RATES" :key="r" :value="r">{{ r }} kbps</option>
+            </select>
+          </label>
           <div class="row wide">
             <button class="btn primary grow" :disabled="dev.busy || !form.name || !form.node_id" @click="submit">
               {{ editId ? "Simpan perubahan" : "Tambah" }}
@@ -346,7 +350,10 @@ function slotChoices(d) {
   if (d.plan_slot != null) set.add(d.plan_slot); // rencana dihitung ulang: tetap tampilkan pilihan lama agar kelihatan
   return [...set].sort((a, b) => a - b);
 }
-const emptyForm = () => ({ node_id: null, name: "", role: "tracker", config: { report_interval_s: 30, tx_power_dbm: 17, sf: 9 } });
+// E220 (chip LLCC68) hanya punya satu setelan air data rate gabungan; ini 6 nilai kbps berbeda yang
+// bermakna (lihat enum pustaka EByte). Bukan SF numerik. Default 2,4 kbps = AIR_DATA_RATE_010_24 firmware.
+const AIR_DATA_RATES = [2.4, 4.8, 9.6, 19.2, 38.4, 62.5];
+const emptyForm = () => ({ node_id: null, name: "", role: "tracker", config: { report_interval_s: 30, tx_power_dbm: 17, air_data_rate: 2.4 } });
 const form = reactive(emptyForm());
 const editId = ref(null);
 
@@ -356,7 +363,10 @@ function resetForm() {
 }
 function edit(d) {
   editId.value = d.id;
-  Object.assign(form, { node_id: d.node_id, name: d.name, role: d.role, config: { ...d.config } });
+  // Baris lama bisa membawa `sf` basi (sebelum rename ke air_data_rate). Buang supaya tidak ikut
+  // tersimpan ulang; d.config sudah mengandung air_data_rate default dari _out() backend.
+  const { sf, ...cfg } = d.config;
+  Object.assign(form, { node_id: d.node_id, name: d.name, role: d.role, config: { ...cfg } });
 }
 async function submit() {
   if (await dev.save(form, editId.value)) resetForm();
