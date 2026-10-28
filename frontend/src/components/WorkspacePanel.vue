@@ -50,13 +50,10 @@
         <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6" /></svg>Tren sinyal</div><div class="sv">{{ trendLabel }}</div></div>
         <div class="pb">
           <div class="sgrid">
-            <div class="sc" v-for="c in trendCards" :key="c.key" :title="c.title">
-              <div class="sc-h"><strong>{{ c.label }}</strong><span :style="c.value === '—' ? 'color: var(--muted)' : ''">{{ c.value }}</span></div>
+            <div class="sc" v-for="c in trendCards" :key="c.key">
+              <div class="sc-h"><strong :title="c.title">{{ c.label }}</strong><span :style="c.value === '—' ? 'color: var(--muted)' : ''">{{ c.value }}</span></div>
               <div class="sc-w">
-                <svg viewBox="0 0 100 24" preserveAspectRatio="none">
-                  <polyline v-if="c.points" :points="c.points" class="sp" :class="c.cls" />
-                  <line v-else x1="0" y1="12" x2="100" y2="12" />
-                </svg>
+                <Sparkline :vals="c.vals" :line-class="c.cls" :format="c.format" />
               </div>
             </div>
           </div>
@@ -67,8 +64,8 @@
         <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>Tunda data (latency)</div><div class="sv">{{ latText }}</div></div>
         <div class="pb" style="padding-bottom: 8px">
           <div class="ekg-c">
-            <div class="ekg-h"><strong>Grafik berjalan</strong><span>{{ latRangeText }}</span></div>
-            <svg v-if="latGraph" class="ekg-svg" viewBox="0 0 300 56" preserveAspectRatio="none"><polyline :points="latGraph" class="sp lat" /></svg>
+            <div class="ekg-h"><strong :title="latTitle">Grafik berjalan</strong><span>{{ latRangeText }}</span></div>
+            <div v-if="latVals.length" class="ekg-svg"><Sparkline :vals="latVals" :w="300" :h="56" :pad="4" line-class="lat" :format="fmtLat" /></div>
             <div v-else class="ekg-w">{{ latEmptyText }}</div>
           </div>
         </div>
@@ -102,6 +99,7 @@ import { useSiteStore } from "../stores/site";
 import { useUiStore } from "../stores/ui";
 import StartGuide from "./StartGuide.vue";
 import DataPanel from "./DataPanel.vue";
+import Sparkline from "./Sparkline.vue";
 
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
@@ -130,18 +128,7 @@ const rssiVals = computed(() => series.value.map((p) => p.rssi_dbm).filter((v) =
 const latVals = computed(() => series.value.map((p) => p.latency_s).filter((v) => v != null));
 const last = (arr) => (arr.length ? arr[arr.length - 1] : null);
 
-// titik polyline dalam kotak W x H; tinggi diskalakan min..max data (data datar -> garis tengah)
-function spark(vals, W = 100, H = 24, pad = 2) {
-  if (!vals.length) return "";
-  if (vals.length === 1) return `0,${H / 2} ${W},${H / 2}`;
-  let lo = Math.min(...vals);
-  let hi = Math.max(...vals);
-  if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
-  const n = vals.length;
-  return vals
-    .map((v, i) => `${((i / (n - 1)) * W).toFixed(1)},${(H - pad - ((v - lo) / (hi - lo)) * (H - 2 * pad)).toFixed(1)}`)
-    .join(" ");
-}
+// Penggambaran garis/skala + crosshair hover kini di Sparkline.vue. Di sini cukup siapkan data & formatter nilai.
 const fmtLat = (v) => (v == null ? "—" : v < 0 ? "jam?" : `${v.toFixed(1)} s`);
 
 const trendLabel = computed(() => (diagStore.trendFor ? `${diagStore.trendFor} · ${series.value.length} paket` : "Menunggu data"));
@@ -149,13 +136,15 @@ const trendCards = computed(() => [
   {
     key: "rssi", label: "Kekuatan sinyal", cls: "rssi",
     value: last(rssiVals.value) != null ? `${last(rssiVals.value)} dBm` : "—",
-    points: spark(rssiVals.value),
+    vals: rssiVals.value,
+    format: (v) => `${v} dBm`,
     title: "RSSI paket yang diterima base (dBm). Makin mendekati 0 makin kuat; di bawah sekitar −110 dBm hampir putus.",
   },
   {
     key: "lat", label: "Tunda data", cls: "lat",
     value: fmtLat(last(latVals.value)),
-    points: spark(latVals.value),
+    vals: latVals.value,
+    format: fmtLat,
     title: "Selisih waktu paket diterima dengan waktu GPS alat, per paket.",
   },
   // Kartu PDR ("Paket sampai") dihapus dari sini: nilainya identik dengan kartu PDR di
@@ -163,7 +152,6 @@ const trendCards = computed(() => [
   // sparkline selalu kosong (garis datar). Angka PDR tetap tampil di Ringkasan.
 ]);
 
-const latGraph = computed(() => spark(latVals.value, 300, 56, 4));
 const latRangeText = computed(() => {
   if (!latVals.value.length) return "—";
   const lo = Math.min(...latVals.value), hi = Math.max(...latVals.value);
@@ -199,8 +187,8 @@ const linkMarginalActive = computed(() => linksDrawn.value && planRelays.value.s
 </script>
 
 <style scoped>
-.sp { fill: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
-.sp.rssi { stroke: var(--blue-fg); }
-.sp.lat { stroke: var(--accent); }
+/* Garis/warna sparkline + crosshair kini di Sparkline.vue. Di sini cukup wadah grafik besar. */
 .ekg-svg { width: 100%; height: 56px; display: block; }
+/* grafik besar: wrapper Sparkline (child) harus mengisi tinggi 56px wadah ini */
+.ekg-svg :deep(.spark) { height: 100%; }
 </style>
