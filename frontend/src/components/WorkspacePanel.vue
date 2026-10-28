@@ -81,10 +81,10 @@
           <div class="lgnd">
             <div class="lg"><span class="sw circle" style="background: var(--marker)"></span>Pendaki</div>
             <div class="lg"><span class="sw circle" style="background: var(--red)"></span>SOS</div>
-            <div class="lg" :class="{ dim: !relayActive }"><span class="sw circle" style="background: var(--violet)"></span>Relay{{ lgSuffix(relayActive) }}</div>
-            <div class="lg" :class="{ dim: !baseActive }"><span class="sw circle" style="background: var(--green)"></span>Base{{ lgSuffix(baseActive) }}</div>
-            <div class="lg" :class="{ dim: !linkKuatActive }"><span class="sw line" style="background: var(--green)"></span>Link kuat{{ lgSuffix(linkKuatActive) }}</div>
-            <div class="lg" :class="{ dim: !linkMarginalActive }"><span class="sw line" style="background: var(--amber)"></span>Link marginal{{ lgSuffix(linkMarginalActive) }}</div>
+            <div class="lg" :class="{ dim: !relayActive }"><span class="sw circle" style="background: var(--violet)"></span>Relay</div>
+            <div class="lg" :class="{ dim: !baseActive }"><span class="sw circle" style="background: var(--green)"></span>Base</div>
+            <div class="lg" :class="{ dim: !linkKuatActive }"><span class="sw line" style="background: var(--green)"></span>Link kuat</div>
+            <div class="lg" :class="{ dim: !linkMarginalActive }" title="Garis oranye di peta: tautan relay dengan sinyal pas-pasan (fade margin tipis). Hijau = kuat."><span class="sw line" style="background: var(--amber)"></span>Link marginal</div>
           </div>
         </div>
       </div>
@@ -194,8 +194,8 @@ const isMarginal = (r) => {
 const linkKuatActive = computed(() => linksDrawn.value && planRelays.value.some((r) => r.link_ok !== false && !isMarginal(r)));
 const linkMarginalActive = computed(() => linksDrawn.value && planRelays.value.some((r) => isMarginal(r)));
 
-// Legenda: label normal saat aktif, "(belum ada data)" + dim saat belum ada.
-const lgSuffix = (active) => (active ? "" : " (belum ada data)");
+// Legenda: item yang belum ada datanya cukup di-dim (lihat .lg.dim), tanpa teks "(belum ada data)"
+// yang dulu bikin baris terlihat seperti rusak. Arti tiap item ada di tooltip (title).
 </script>
 
 <style scoped>

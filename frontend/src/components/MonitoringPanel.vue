@@ -22,12 +22,16 @@
                   <strong>{{ nameFor(hikerStore.selectedCode) || hikerStore.selectedCode }}</strong>
                   <span v-if="nameFor(hikerStore.selectedCode)" class="selc-code" title="Kode alat (hardware)">{{ hikerStore.selectedCode }}</span>
                   <span class="selc-trail">{{ selected.route_path || "langsung" }}</span>
+                  <!-- Badge status pendaki dikumpulkan di kolom kiri (di bawah trail) supaya tidak menumpuk
+                       di kolom kanan dan menekan angka baterai. Badge utama DINAMIS: kondisi terburuk aktual
+                       (SOS merah > di luar jalur / tidak terdengar amber > Normal hijau). -->
+                  <div class="selc-badges">
+                    <span v-if="hikerStore.selectedCode" class="bdg" :class="statusFor(hikerStore.selectedCode).cls">{{ selStatusLabel }}</span>
+                    <span v-if="selDiag?.stale" class="bdg warn" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
+                    <span v-if="selected.gps_valid === false" class="bdg neutral" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta = lokasi terakhir">GPS tidak valid · lokasi terakhir</span>
+                  </div>
                 </div>
                 <div class="selc-side">
-                  <span class="bdg" :class="selSosCount > 0 ? 'bad' : 'ok'">{{ selSosCount > 0 ? "SOS" : "Normal" }}</span>
-                  <span v-if="hikerStore.selectedCode && offTrailCodes.has(hikerStore.selectedCode)" class="bdg warn">Di luar jalur</span>
-                  <span v-if="selDiag?.stale" class="bdg warn" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
-                  <span v-if="selected.gps_valid === false" class="bdg neutral" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta = lokasi terakhir">GPS tidak valid · lokasi terakhir</span>
                   <div class="selc-batt" :class="battClass(selected.battery_pct)">
                     <strong>{{ selected.battery_pct != null ? `${selected.battery_pct}%` : "—" }}</strong>
                     <span>Baterai</span>
@@ -96,8 +100,7 @@
                       · {{ fmtTime(hikerStore.hikers[code].recorded_at) }}
                     </span>
                   </div>
-                  <span v-if="offTrailCodes.has(code)" class="bdg warn">Di luar jalur</span>
-                  <span class="bdg" :class="sosCountFor(code) > 0 ? 'bad' : 'ok'">{{ sosCountFor(code) > 0 ? "SOS" : "OK" }}</span>
+                  <span class="bdg" :class="statusFor(code).cls">{{ statusFor(code).label }}</span>
                   <svg class="hchev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
                 </div>
                 <GpxExportButton :hiker-code="code" @click.stop />
@@ -226,12 +229,29 @@ function sosCountFor(code) {
   return alertStore.alerts.filter((a) => a.hiker_code === code && a.alert_type !== "OFF_TRAIL").length;
 }
 const selSosCount = computed(() => (hikerStore.selectedCode ? sosCountFor(hikerStore.selectedCode) : 0));
+// Label badge utama panel kanan: pakai statusFor, tapi "OK" diganti "Normal" agar sesuai gaya panel detail.
+const selStatusLabel = computed(() => {
+  if (!hikerStore.selectedCode) return "";
+  const s = statusFor(hikerStore.selectedCode);
+  return s.label === "OK" ? "Normal" : s.label;
+});
 // Jumlah alarm SOS (merah) untuk badge merah tab, OFF_TRAIL dikecualikan.
 const sosAlertCount = computed(() => alertStore.alerts.filter((a) => a.alert_type !== "OFF_TRAIL").length);
 // Kode alat yang punya alarm OFF_TRAIL aktif -> badge amber "Di luar jalur" (hilang saat alarm di-resolve).
 const offTrailCodes = computed(
   () => new Set(alertStore.alerts.filter((a) => a.alert_type === "OFF_TRAIL").map((a) => a.hiker_code))
 );
+
+// Badge status pendaki DINAMIS: menampilkan kondisi TERBURUK yang aktual, bukan sekadar "OK" hijau.
+// Urutan keparahan: SOS (merah) > di luar jalur / tidak terdengar (amber) > OK (hijau).
+// Merah HANYA untuk SOS (OFF_TRAIL & stale = amber). Dipakai sama di kartu daftar dan panel pendaki terpilih
+// supaya kedua tempat tidak pernah bertentangan (dulu "OK" hijau bisa muncul padahal pendaki di luar jalur).
+function statusFor(code) {
+  if (sosCountFor(code) > 0) return { label: "SOS", cls: "bad" };
+  if (offTrailCodes.value.has(code)) return { label: "Di luar jalur", cls: "warn" };
+  if (diagStore.sessions[code]?.stale) return { label: "Tidak terdengar", cls: "warn" };
+  return { label: "OK", cls: "ok" };
+}
 
 watch(
   hikerCodes,

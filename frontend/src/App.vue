@@ -305,7 +305,7 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .rf-c span { display: block; font-size: 14px; font-weight: 700; line-height: 1.3; }
 .lgnd { display: flex; gap: 8px 14px; flex-wrap: wrap; }
 .lg { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
-.lg.dim { opacity: 0.6; }
+.lg.dim { opacity: 0.8; }
 .sw.circle { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
 .sw.line { width: 14px; height: 4px; border-radius: 2px; display: inline-block; }
 
@@ -328,6 +328,8 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .selc-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .selc-id strong { font-family: var(--font-head); font-size: 24px; font-weight: 800; color: var(--text); }
 .selc-trail { font-size: 13px; color: var(--text-2); }
+/* Badge status pendaki di kolom kiri (di bawah trail): baris yang bisa wrap, rapat, tidak menekan kolom kanan. */
+.selc-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
 .selc-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
 .selc-batt { display: flex; flex-direction: column; align-items: flex-end; margin-top: 3px; }
 .selc-batt strong { font-family: var(--font-head); font-size: 26px; font-weight: 800; line-height: 1; color: var(--text); }
