@@ -19,7 +19,8 @@
             <div class="selc" v-if="selected">
               <div class="selc-top">
                 <div class="selc-id">
-                  <strong>{{ hikerStore.selectedCode }}</strong>
+                  <strong>{{ nameFor(hikerStore.selectedCode) || hikerStore.selectedCode }}</strong>
+                  <span v-if="nameFor(hikerStore.selectedCode)" class="selc-code" title="Kode alat (hardware)">{{ hikerStore.selectedCode }}</span>
                   <span class="selc-trail">{{ selected.route_path || "langsung" }}</span>
                 </div>
                 <div class="selc-side">
@@ -87,9 +88,9 @@
                 <div class="ht">
                   <span class="hnum">{{ idx + 1 }}</span>
                   <div class="hid-wrap">
-                    <span class="hid">{{ code }}</span>
+                    <span class="hid">{{ nameFor(code) || code }}</span>
                     <span class="hpos">
-                      {{ hikerStore.hikers[code].battery_pct != null ? `${hikerStore.hikers[code].battery_pct}%` : "Baterai —" }}
+                      <template v-if="nameFor(code)">{{ code }} · </template>{{ hikerStore.hikers[code].battery_pct != null ? `${hikerStore.hikers[code].battery_pct}%` : "Baterai —" }}
                       · {{ fmtTime(hikerStore.hikers[code].recorded_at) }}
                     </span>
                   </div>
@@ -164,6 +165,7 @@
 import { computed, ref, watch } from "vue";
 import { useHikerStore } from "../stores/hikers";
 import { useAlertStore } from "../stores/alerts";
+import { useSessionStore } from "../stores/sessions";
 import { useDiagnosticsStore } from "../stores/diagnostics";
 import GpxExportButton from "./GpxExportButton.vue";
 import RssiScatter from "./RssiScatter.vue";
@@ -172,6 +174,7 @@ import { alertLabel } from "../utils/alerts";
 
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
+const sessionStore = useSessionStore();
 const diagStore = useDiagnosticsStore();
 const uiStore = useUiStore();
 const collapsed = ref(false);
@@ -193,6 +196,20 @@ function hopText(n) {
 // kebenaran buat "siapa yang lagi dipilih monitor", dua arah.
 const hikerCodes = computed(() => Object.keys(hikerStore.hikers).sort((a, b) => a.localeCompare(b)));
 const selected = computed(() => (hikerStore.selectedCode ? hikerStore.hikers[hikerStore.selectedCode] : null));
+
+// Peta kode alat -> nama pendaki dari sesi aktif (join di frontend, tanpa ubah backend/SSE).
+// Sesi yang dibuka otomatis (alat kirim data sebelum check-in) full_name-nya kosong -> jatuh ke kode.
+const codeToName = computed(() => {
+  const m = {};
+  for (const s of sessionStore.active) {
+    if (s.hiker_code && s.full_name) m[s.hiker_code] = s.full_name;
+  }
+  return m;
+});
+// Nama pendaki bila ada, selain itu null (pemanggil pakai kode alat sebagai judul cadangan).
+function nameFor(code) {
+  return (code && codeToName.value[code]) || null;
+}
 
 function sosCountFor(code) {
   return alertStore.alerts.filter((a) => a.hiker_code === code).length;
@@ -240,6 +257,8 @@ function fmtTime(ts) {
 <style scoped>
 /* Cuaca & Kontrol dihapus -> sisa 4 sel (sinyal, relay, satelit, jumlah SOS) ditata 2x2 agar rapat tanpa sel yatim */
 .selc-grid.secondary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Kode alat (H01) sebagai subjudul kecil di bawah nama pendaki: operator tetap bisa rujuk-silang perangkat. */
+.selc-code { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; }
 .sosev .ack-btn { background: var(--red); color: #fff; }
 .sosev .ack-btn:hover:not(:disabled) { background: var(--red); filter: brightness(0.92); }
 </style>
