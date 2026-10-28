@@ -51,7 +51,7 @@ Dokumen ini hanya membahas bagian perangkat lunak (dashboard, backend, basis dat
 - Jarak jalur pendakian: jarak horizontal (great-circle Haversine, radius 6371008,8 m konsisten dengan `geo_dist_m`) dihitung instan di peramban begitu base dan minimal dua titik trail ada, lengkap dengan rincian per-segmen. Angka profil 3D (naik-turun sepanjang jalur dari DEM) ditambahkan sebagai angka sekunder setelah DEM siap; segmen di luar cakupan DEM ditandai "sebagian jalur di luar cakupan DEM" (warna amber) dan tidak mengarang elevasi.
 - Panel "Mode developer / parameter hardware" di Setup, hanya tampil saat Mode lanjutan menyala. Mengelompokkan parameter radio/planner dan konfigurasi per-perangkat dengan tooltip penjelas tiap parameter (fungsi, efek naik-turun, dan catatan kecocokan dengan firmware yang di-flash). Operator harian (Mode lanjutan mati) tidak melihat panel ini.
 - Ekspor jejak sesi ke GPX.
-- Manajemen perangkat dan antrean konfigurasi (SF, interval lapor, daya) yang dikirim bridge ke port serial.
+- Manajemen perangkat dan antrean konfigurasi (air data rate, interval lapor, daya) yang dikirim bridge ke port serial.
 
 ## Perbedaan dengan C-251 dan Alasannya
 
@@ -83,7 +83,7 @@ Nomor subbab C-251 di bawah dirujuk dari draf C-601. Cocokkan dengan dokumen C-2
 | P08 | Sesi pendakian | Tanpa identitas pendaki | Check-in dan check-out per perangkat, satu sesi aktif per perangkat | Portable node dipinjamkan berulang. Tanpa sesi, jejak dua perjalanan bercampur sehingga deteksi diam dan GPX menjadi salah. Tim SAR membutuhkan koordinat yang terkait orang yang bisa dihubungi. Batas: menyimpan data pribadi dan belum ada autentikasi. |
 | P09 | Alarm otomatis | Alarm darurat hanya dari tombol SOS manual | Ditambah alarm stagnan otomatis dengan jendela waktu bergantung perimeter jalur | Argumen C-251 terhadap radio HT (korban harus sadar) berlaku sama terhadap tombol manual. Radius bawaan 50 m dipilih sebagai dua kali batas galat GPS vegetasi C-251 (25 m). Jendela waktu dibuat dua tingkat: bila posisi terakhir pendaki masih di dalam koridor (perimeter bawaan 50 m dari garis jalur), diam dianggap wajar (istirahat atau tidur) sehingga jendela panjang (bawaan 480 menit, sekitar 8 jam); bila sudah menyimpang keluar koridor, diam lebih mungkin kecelakaan sehingga jendela pendek (bawaan 240 menit, 4 jam). Bila lokasi aktif belum punya jalur (kurang dari dua titik), deteksi stagnan tidak dijalankan; jalur SOS manual dari hardware (`sos_watch.py`) terpisah dan tidak terpengaruh. Itu penalaran awal yang masuk akal, tetapi belum divalidasi dengan data lapangan. Batas: pendaki yang beristirahat panjang di dalam koridor tetap bisa memicu alarm, artinya "perlu dicek" bukan "darurat pasti". Perimeter 50 m dan kedua jendela adalah ASUMSI BELUM DIKALIBRASI; ketiganya dapat diubah lewat env (`STAGNANT_PERIMETER_M`, `STAGNANT_WINDOW_INSIDE_MINUTES`, `STAGNANT_WINDOW_OUTSIDE_MINUTES`). |
 | P10 | Kalibrasi propagasi | Dijadwalkan sebagai agenda Capstone 2 (Subbab 11.2) | Panel RSSI terhadap jarak dengan estimasi n dan sigma | Menjalankan agenda tersebut. Hanya paket langsung, karena RSSI adalah besaran per tautan. Batas: syarat minimum titik bukan jaminan keandalan statistik, dan n cenderung ditaksir terlalu kecil akibat galat jarak GPS. |
-| P11 | Konfigurasi perangkat | Tidak ada mekanisme mengubah parameter setelah fabrikasi | Antrean konfigurasi dari dashboard ke base lewat bridge, validasi SF 5 sampai 11 | Duty cycle dinamis dan SF adalah parameter kendali di C-251, dan mengubahnya tanpa memprogram ulang node dibutuhkan di lapangan. Batas SF berasal dari chip LLCC68 yang tidak mendukung SF12. Batas: dukungan firmware belum ada (lihat bagian Push Konfigurasi). |
+| P11 | Konfigurasi perangkat | Tidak ada mekanisme mengubah parameter setelah fabrikasi | Antrean konfigurasi dari dashboard ke base lewat bridge, validasi air data rate (salah satu dari 2,4 / 4,8 / 9,6 / 19,2 / 38,4 / 62,5 kbps) | Duty cycle dinamis dan laju data adalah parameter kendali di C-251, dan mengubahnya tanpa memprogram ulang node dibutuhkan di lapangan. Modul E220 (chip LLCC68) tidak mengekspos SF, bandwidth, dan coding rate secara terpisah, hanya satu setelan air data rate gabungan, jadi dashboard memvalidasi enam nilai kbps itu, bukan angka SF. Batas: dukungan firmware belum ada (lihat bagian Push Konfigurasi). |
 | P12 | Ekspor GPX | Integrasi platform eksternal di luar lingkup | Ekspor jejak sesi dan rencana relay ke berkas GPX | GPX adalah format tukar standar untuk perangkat navigasi dan aplikasi peta. Ekspor berkas membawa koordinat ke alur kerja SAR tanpa integrasi online yang dikecualikan C-251. |
 | P13 | Node basi | Indikator status komunikasi tiap node | Ditandai "tidak terdengar" bila tidak ada paket lebih dari 120 detik | Empat kali interval lapor. Bila kehilangan paket saling bebas dan PDR 80 persen, empat paket beruntun hilang berpeluang 0,16 persen, jadi alarm palsu jarang tetapi tetap cepat. Batas: kehilangan paket nyata cenderung beruntun, jadi asumsi bebas belum terverifikasi. |
 
@@ -221,7 +221,7 @@ Catatan: frekuensi bawaan perencana adalah 922 MHz, mengikuti pita legal Indones
 ### B. Mendaftarkan perangkat
 
 1. Di panel Setup, buka tab "Perangkat".
-2. Isi Node ID (sama dengan `node_id` pada firmware, 1 sampai 254), peran (`tracker`, `relay`, atau `base`), nama, dan konfigurasi (interval lapor, daya, SF), lalu simpan.
+2. Isi Node ID (sama dengan `node_id` pada firmware, 1 sampai 254), peran (`tracker`, `relay`, atau `base`), nama, dan konfigurasi (interval lapor, daya, air data rate), lalu simpan.
 3. Perangkat berperan `tracker` otomatis dipetakan ke kode pendaki `H01`, `H02`, dan seterusnya sesuai Node ID.
 
 ### C. Menyalakan penerimaan data
@@ -412,20 +412,20 @@ Cara membersihkan data uji: `docker compose down -v`. Perintah ini menghapus sel
 
 ## Push Konfigurasi ke Perangkat
 
-Yang dimaksud di sini adalah konfigurasi radio (interval lapor, daya, SF) yang didorong dari dashboard. Kode firmware ESP32 tidak ada di repositori ini dan tidak dikirim lewat dashboard.
+Yang dimaksud di sini adalah konfigurasi radio (interval lapor, daya, air data rate) yang didorong dari dashboard. Kode firmware ESP32 tidak ada di repositori ini dan tidak dikirim lewat dashboard.
 
 Alur:
 
 1. Di Setup, tab "Perangkat", ubah konfigurasi lalu simpan. Versi konfigurasi naik dan perangkat ditandai belum sinkron.
 2. Klik "Push" pada perangkat (atau tombol push untuk semua perangkat yang belum sinkron). Dashboard menaruh perintah berstatus `pending` di tabel `device_commands`.
 3. Bridge memeriksa antrean setiap 2 detik dan menulis satu baris ke port serial base station:
-   `CFG,<node_id>,<nama>,<peran>,<interval_lapor_detik>,<daya_dBm>,<sf>,<versi>`
+   `CFG,<node_id>,<nama>,<peran>,<interval_lapor_detik>,<daya_dBm>,<air_data_rate_kbps>,<versi>`
 4. Bila firmware membalas `CFG_ACK,<node_id>,<versi>`, status menjadi `acked` dan perangkat dianggap sinkron. Tanpa balasan, status berhenti di `sent`. Dengan opsi `--no-ack`, status langsung `acked` begitu baris ditulis.
 
 Peringatan penting:
 
 - Format `CFG` adalah usulan. Firmware belum tentu mengenalinya, dan belum tentu base meneruskannya ke node tujuan. Status `acked` dengan `--no-ack` tidak membuktikan perangkat menerima konfigurasi. Jangan memakai fitur ini sebagai satu-satunya cara mengubah parameter di lapangan sebelum dukungan firmware dipastikan.
-- Validasi di backend: SF 5 sampai 11, interval lapor 5 sampai 3600 detik, daya 2 sampai 20 dBm. Rentang daya itu belum diselaraskan dengan level daya diskrit modul E220.
+- Validasi di backend: air data rate salah satu dari 2,4 / 4,8 / 9,6 / 19,2 / 38,4 / 62,5 kbps (setelan modul E220), interval lapor 5 sampai 3600 detik, daya 2 sampai 20 dBm. Rentang daya itu belum diselaraskan dengan level daya diskrit modul E220.
 
 Untuk tim hardware, hal yang perlu dipastikan:
 

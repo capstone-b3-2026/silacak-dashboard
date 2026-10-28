@@ -18,7 +18,11 @@ router = APIRouter(prefix="/devices", tags=["devices"])
 
 ROLES = ("tracker", "relay", "base")
 # Nilai awal yang masuk akal; sesuaikan dengan apa yang benar-benar didukung firmware.
-DEFAULT_CONFIG = {"report_interval_s": 30, "tx_power_dbm": 17, "sf": 9}
+DEFAULT_CONFIG = {"report_interval_s": 30, "tx_power_dbm": 17, "air_data_rate": 2.4}
+# E220 (chip LLCC68) tidak mengekspos SF/bandwidth/coding-rate terpisah; hanya satu setelan
+# "air data rate" gabungan. Ini 6 nilai kbps berbeda dari enum pustaka EByte (default firmware
+# 2,4 kbps = AIR_DATA_RATE_010_24). Dipakai validasi _check() sebagai himpunan, bukan rentang.
+AIR_DATA_RATES = (2.4, 4.8, 9.6, 19.2, 38.4, 62.5)
 
 
 def _j(v):
@@ -52,8 +56,10 @@ def _check(body: DeviceIn) -> None:
         raise HTTPException(422, "report_interval_s harus 5..3600 detik")
     if "tx_power_dbm" in c and not (2 <= int(c["tx_power_dbm"]) <= 20):
         raise HTTPException(422, "tx_power_dbm harus 2..20")
-    if "sf" in c and not (5 <= int(c["sf"]) <= 11):  # LLCC68 (E220-900T22D) tidak mendukung SF12
-        raise HTTPException(422, "sf harus 5..11 (batas chip LLCC68)")
+    # E220 hanya mendukung beberapa air data rate diskret; cek keanggotaan himpunan (bukan rentang)
+    # supaya perbandingan float aman. Bila field absen, DEFAULT_CONFIG yang mengisinya (jangan gagal).
+    if "air_data_rate" in c and float(c["air_data_rate"]) not in AIR_DATA_RATES:
+        raise HTTPException(422, f"air_data_rate harus salah satu dari {AIR_DATA_RATES} kbps (setelan modul E220)")
 
 
 async def _list(conn):

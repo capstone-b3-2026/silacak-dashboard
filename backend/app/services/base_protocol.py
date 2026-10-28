@@ -259,4 +259,4 @@ def build_cfg_line(p: dict) -> str:
     """Usulan format downlink (firmware BELUM mengerti; lihat catatan di reference bridge)."""
     c = p["config"]
     name = str(p["name"]).replace(",", " ")
-    return f"CFG,{p['node_id']},{name},{p['role']},{c['report_interval_s']},{c['tx_power_dbm']},{c['sf']},{p['version']}\n"
+    return f"CFG,{p['node_id']},{name},{p['role']},{c['report_interval_s']},{c['tx_power_dbm']},{c['air_data_rate']},{p['version']}\n"
