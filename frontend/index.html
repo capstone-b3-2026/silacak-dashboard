@@ -3,8 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Edge --app mengambil ikon jendela/taskbar dari favicon halaman. Pakai logo yang sudah ada di public/
-         (disajikan Vite dari root), bukan ikon globe bawaan. -->
+    <!-- Edge --app mengambil ikon jendela/taskbar dari favicon halaman. Pakai .ico 256x256 (bukan PNG 291x226
+         yang kecil dan tidak kotak, yang bikin ikon taskbar Windows buram saat di-scale). .ico didahulukan
+         karena format ikon native Windows; PNG disisakan sebagai fallback. -->
+    <link rel="icon" type="image/x-icon" href="/LOGO.ico" sizes="256x256" />
     <link rel="icon" type="image/png" href="/LOGO.png" />
     <link rel="apple-touch-icon" href="/LOGO.png" />
     <title>SiLacak | Basecamp Dashboard</title>
