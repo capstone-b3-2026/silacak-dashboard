@@ -11,7 +11,7 @@ dashboard terbuka di browser, base station dikenali otomatis. Tanpa Docker, Node
    Pilihan disimpan di `data\app_settings.json` dan langsung berlaku tanpa restart; bisa diubah lagi di `http://127.0.0.1:<port>/pengaturan`.
    Menutup wizard tanpa menjawab tidak memblokir apa pun.
 4. Menjalankan backend yang sekaligus menyajikan dashboard dan membaca USB serial base station (`SERIAL_PORT=auto`).
-5. Membuka jendela dashboard (Edge `--app` bila ada, jika tidak browser bawaan).
+5. Membuka jendela dashboard (Edge `--app --start-fullscreen` bila ada, jika tidak browser bawaan). Mode layar penuh menyembunyikan title bar agar terasa seperti aplikasi native; operator tetap bisa keluar dengan F11 atau menutup dengan Alt+F4. Ikon jendela/taskbar memakai logo aplikasi (favicon di `frontend/index.html`).
 6. Saat ditutup: menghentikan database dengan rapi. Kalau jendela ditutup paksa, peluncuran berikutnya memakai ulang database yang masih hidup.
 
 Data pengguna (database, DEM/tile, log mentah serial `data\raw\`) ada di `%LOCALAPPDATA%\SiLacak`, terpisah dari folder program.

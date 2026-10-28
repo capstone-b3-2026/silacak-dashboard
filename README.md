@@ -231,7 +231,7 @@ Colokkan base station ke USB, pastikan layanan Docker berjalan, lalu jalankan br
 ### D. Check-in pendaki
 
 1. Buka panel "sesi pendakian" (terlipat secara bawaan, klik untuk membuka).
-2. Isi kode alat (mis. H01), nama pendaki, kontak darurat (opsional), dan jalur (opsional), lalu klik "Mulai sesi".
+2. Pilih alat dari dropdown (daftar perangkat terdaftar bertipe tracker, mis. "H01 - Tracker Andi"; alat yang sedang dipakai sesi aktif tidak muncul agar tidak dobel). Isi nama pendaki, kontak darurat (opsional), dan jalur (opsional), lalu klik "Mulai sesi". Bila belum ada alat terdaftar, muncul petunjuk untuk menambahkannya di Setup > Perangkat.
 3. Bila sebuah alat mengirim data tetapi belum di-check-in, muncul banner "Belum check-in" dengan tautan "isi data". Sesi dibuka otomatis dan ditandai `auto_opened` agar datanya tidak terbuang. Lengkapi datanya dari banner tersebut.
 
 ### E. Memantau
