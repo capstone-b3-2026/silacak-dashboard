@@ -145,14 +145,15 @@ const paramFields = [
   { k: "search_radius_km", label: "Radius cari (km)", step: 0.05 },
   { k: "search_step_km", label: "Langkah cari (km)", step: 0.01 },
 ];
+// Margin fading & offset kalibrasi SENGAJA tidak ditampilkan sebagai input operator (membingungkan).
+// Backend tetap memakai default (fade_margin_db=10, calib_offset_db=0) atau nilai dari fitur Kalibrasi
+// RSSI lapangan (bagian 5) yang masih menyetelnya otomatis di belakang layar.
 const budgetFields = [
   { k: "tx_dbm", label: "Daya TX (dBm)", step: 1 },
   { k: "sensitivity_dbm", label: "Sensitivitas (dBm)", step: 1 },
   { k: "gain_hiker_dbi", label: "Gain antena pendaki (dBi)", step: 0.5 },
   { k: "gain_relay_dbi", label: "Gain antena relay/base (dBi)", step: 0.5 },
-  { k: "fade_margin_db", label: "Margin fading (dB)", step: 0.5 },
   { k: "veg_scale", label: "Skala vegetasi (0–1)", step: 0.1 },
-  { k: "calib_offset_db", label: "Offset kalibrasi (dB)", step: 0.5 },
 ];
 </script>
 
