@@ -77,5 +77,11 @@ export const useAlertStore = defineStore("alerts", {
       await acknowledgeAlert(alertId);
       this.alerts = this.alerts.filter((a) => a.id !== alertId);
     },
+    // Alarm yang DISELESAIKAN OLEH BACKEND (bukan operator), mis. OFF_TRAIL saat pendaki kembali masuk
+    // perimeter. Datang lewat pesan SSE "alert_resolved". Hanya menghapus dari daftar aktif; TIDAK memanggil
+    // server (resolve sudah dilakukan backend) dan TIDAK menandai acked (alarm sejenis berikutnya tetap bisa muncul).
+    resolveById(id) {
+      this.alerts = this.alerts.filter((a) => a.id !== id);
+    },
   },
 });

@@ -25,6 +25,7 @@
                 </div>
                 <div class="selc-side">
                   <span class="bdg" :class="selSosCount > 0 ? 'bad' : 'ok'">{{ selSosCount > 0 ? "SOS" : "Normal" }}</span>
+                  <span v-if="hikerStore.selectedCode && offTrailCodes.has(hikerStore.selectedCode)" class="bdg warn">Di luar jalur</span>
                   <span v-if="selDiag?.stale" class="bdg warn" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
                   <span v-if="selected.gps_valid === false" class="bdg neutral" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta = lokasi terakhir">GPS tidak valid · lokasi terakhir</span>
                   <div class="selc-batt" :class="battClass(selected.battery_pct)">
@@ -66,7 +67,8 @@
             <div class="tabs" role="tablist" aria-label="Daftar pemantauan" :style="{ '--tabs': tabs.length }">
               <button v-for="t in tabs" :key="t" class="tab" role="tab" :aria-selected="activeTab === t" :class="{ active: activeTab === t }" @click="activeTab = t">
                 {{ TAB_LABELS[t] }}
-                <span v-if="t === 'sos' && alertStore.alerts.length" class="tab-badge">{{ alertStore.alerts.length }}</span>
+                <!-- badge merah = SOS saja (merah = SOS). OFF_TRAIL amber tidak menambah angka merah ini. -->
+                <span v-if="t === 'sos' && sosAlertCount" class="tab-badge">{{ sosAlertCount }}</span>
               </button>
             </div>
           </div>
@@ -94,6 +96,7 @@
                       · {{ fmtTime(hikerStore.hikers[code].recorded_at) }}
                     </span>
                   </div>
+                  <span v-if="offTrailCodes.has(code)" class="bdg warn">Di luar jalur</span>
                   <span class="bdg" :class="sosCountFor(code) > 0 ? 'bad' : 'ok'">{{ sosCountFor(code) > 0 ? "SOS" : "OK" }}</span>
                   <svg class="hchev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" /></svg>
                 </div>
@@ -148,10 +151,16 @@
           <div class="pb" style="overflow-y: auto; flex: 1; min-height: 0">
             <div v-if="!alertStore.alerts.length" class="empty">Belum ada SOS</div>
             <div v-else class="sosl">
-              <div v-for="a in alertStore.alerts" :key="a.id" class="sosev">
-                <div class="etit"><span>{{ a.hiker_code }}</span><span class="bdg bad">{{ alertLabel(a.alert_type) }}</span></div>
-                <div class="emeta">{{ fmtTime(a.triggered_at) }}</div>
-                <button class="ack-btn" @click="alertStore.acknowledge(a.id)">Tandai sudah ditangani</button>
+              <div v-for="a in alertStore.alerts" :key="a.id" class="sosev" :class="{ offtrail: a.alert_type === 'OFF_TRAIL' }">
+                <div class="etit">
+                  <span>{{ a.hiker_code }}</span>
+                  <span class="bdg" :class="a.alert_type === 'OFF_TRAIL' ? 'warn' : 'bad'">{{ alertLabel(a.alert_type) }}</span>
+                </div>
+                <div class="emeta">
+                  {{ fmtTime(a.triggered_at) }}<template v-if="a.alert_type === 'OFF_TRAIL' && a.meta?.dist_to_trail_m != null"> · {{ Math.round(a.meta.dist_to_trail_m) }} m dari jalur</template>
+                </div>
+                <!-- OFF_TRAIL tidak bisa disenyapkan manual: hilang sendiri saat pendaki kembali masuk perimeter -->
+                <button v-if="a.alert_type !== 'OFF_TRAIL'" class="ack-btn" @click="alertStore.acknowledge(a.id)">Tandai sudah ditangani</button>
               </div>
             </div>
           </div>
@@ -211,10 +220,18 @@ function nameFor(code) {
   return (code && codeToName.value[code]) || null;
 }
 
+// SOS merah = MANUAL_SOS/STAGNANT. OFF_TRAIL (amber) TIDAK ikut hitungan SOS: kartu/badge pendaki
+// tidak boleh menyala merah karena di luar jalur (merah = SOS saja).
 function sosCountFor(code) {
-  return alertStore.alerts.filter((a) => a.hiker_code === code).length;
+  return alertStore.alerts.filter((a) => a.hiker_code === code && a.alert_type !== "OFF_TRAIL").length;
 }
 const selSosCount = computed(() => (hikerStore.selectedCode ? sosCountFor(hikerStore.selectedCode) : 0));
+// Jumlah alarm SOS (merah) untuk badge merah tab, OFF_TRAIL dikecualikan.
+const sosAlertCount = computed(() => alertStore.alerts.filter((a) => a.alert_type !== "OFF_TRAIL").length);
+// Kode alat yang punya alarm OFF_TRAIL aktif -> badge amber "Di luar jalur" (hilang saat alarm di-resolve).
+const offTrailCodes = computed(
+  () => new Set(alertStore.alerts.filter((a) => a.alert_type === "OFF_TRAIL").map((a) => a.hiker_code))
+);
 
 watch(
   hikerCodes,
@@ -261,4 +278,6 @@ function fmtTime(ts) {
 .selc-code { font-size: 13px; font-weight: 700; color: var(--muted); letter-spacing: 0.02em; }
 .sosev .ack-btn { background: var(--red); color: #fff; }
 .sosev .ack-btn:hover:not(:disabled) { background: var(--red); filter: brightness(0.92); }
+/* OFF_TRAIL = peringatan amber, BUKAN merah (merah = SOS saja). Aksen kiri + latar amber lembut. */
+.sosev.offtrail { border-left-color: var(--amber); background: var(--amber-glow); }
 </style>

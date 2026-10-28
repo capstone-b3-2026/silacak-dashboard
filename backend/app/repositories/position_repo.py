@@ -153,6 +153,24 @@ async def get_active_sessions_latest_position(conn):
     return [dict(r) for r in rows]
 
 
+async def get_recent_fixes_for_session(conn, session_id: int, limit: int):
+    """`limit` fix (posisi dengan lokasi) TERBARU untuk satu sesi, urut terbaru->terlama.
+    Dipakai off_trail_watch untuk menilai debounce (N paket terakhir di luar perimeter?).
+    Koordinat: x=lon, y=lat (konvensi proyek). SQL berparameter."""
+    rows = await conn.fetch(
+        """
+        SELECT (location)[1] AS lat, (location)[0] AS lon
+        FROM positions
+        WHERE session_id = $1 AND location IS NOT NULL
+        ORDER BY recorded_at DESC
+        LIMIT $2
+        """,
+        session_id,
+        limit,
+    )
+    return [dict(r) for r in rows]
+
+
 async def find_stagnant_sessions(conn, window_minutes: int, radius_m: float):
     """
     Deteksi SESI AKTIF yang seluruh titiknya dalam `window_minutes` terakhir

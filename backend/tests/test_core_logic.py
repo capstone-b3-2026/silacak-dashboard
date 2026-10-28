@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from app.services import base_protocol as bp
 from app.services.geo import (
-    choose_window_minutes, dist_point_to_trail_m, haversine_m, thin_indices, thin_track,
+    choose_window_minutes, dist_point_to_trail_m, haversine_m, is_off_trail, thin_indices, thin_track,
 )
 from app.services.liveness import FALLBACK_S, MAX_S, MIN_S, observed_interval_s, stale_threshold_s
 
@@ -317,6 +317,46 @@ class DistToTrail(unittest.TestCase):
 
     def test_hasil_float(self):
         self.assertIsInstance(dist_point_to_trail_m((-7.595, 110.40), self.TRAIL), float)
+
+
+class OffTrail(unittest.TestCase):
+    """Peringatan dini "di luar jalur" (is_off_trail). Konvensi LAT DULU, perimeter 50 m, debounce 3.
+
+    Trail acuan = segmen vertikal (bujur 110.40) dari (-7.60) ke (-7.59). Titik DI DALAM koridor
+    punya bujur ~110.40; titik DI LUAR digeser ~0.001 derajat bujur (~110 m, jauh di luar 50 m)."""
+    TRAIL = [(-7.60, 110.40), (-7.59, 110.40)]
+    PERIM = 50.0
+    IN = (-7.595, 110.40)          # tepat di atas trail (jarak ~0 m)
+    OUT = (-7.595, 110.401)        # ~110 m ke timur dari trail (di luar perimeter)
+
+    def test_semua_di_dalam_tidak_off_trail(self):
+        self.assertFalse(is_off_trail([self.IN, self.IN, self.IN], self.TRAIL, self.PERIM))
+
+    def test_hanya_satu_terbaru_di_luar_belum_off_trail(self):
+        # lonjakan GPS satu paket: terbaru di luar, dua sebelumnya di dalam -> belum off-trail
+        self.assertFalse(is_off_trail([self.OUT, self.IN, self.IN], self.TRAIL, self.PERIM))
+
+    def test_tiga_terbaru_di_luar_off_trail(self):
+        self.assertTrue(is_off_trail([self.OUT, self.OUT, self.OUT], self.TRAIL, self.PERIM))
+
+    def test_trail_kurang_dari_dua_titik_dilewati(self):
+        self.assertFalse(is_off_trail([self.OUT, self.OUT, self.OUT], [], self.PERIM))
+        self.assertFalse(is_off_trail([self.OUT, self.OUT, self.OUT], [(-7.60, 110.40)], self.PERIM))
+
+    def test_kurang_dari_debounce_belum_off_trail(self):
+        # baru 2 paket di luar (debounce butuh 3) -> belum cukup bukti
+        self.assertFalse(is_off_trail([self.OUT, self.OUT], self.TRAIL, self.PERIM))
+
+    def test_kembali_masuk_tidak_off_trail(self):
+        # dasar auto-resolve: paket terbaru kembali di dalam walau paket lama di luar
+        self.assertFalse(is_off_trail([self.IN, self.OUT, self.OUT], self.TRAIL, self.PERIM))
+
+    def test_daftar_kosong_tidak_off_trail(self):
+        self.assertFalse(is_off_trail([], self.TRAIL, self.PERIM))
+
+    def test_hasil_boolean(self):
+        self.assertIsInstance(is_off_trail([self.OUT, self.OUT, self.OUT], self.TRAIL, self.PERIM), bool)
+        self.assertIsInstance(is_off_trail([self.IN, self.IN, self.IN], self.TRAIL, self.PERIM), bool)
 
 
 class PilihWindow(unittest.TestCase):
