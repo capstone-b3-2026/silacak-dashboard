@@ -9,9 +9,9 @@ Backend harus sudah pernah dijalankan (supaya tabel `sites` ada):
 
     docker compose up -d --build
     docker compose exec backend python scripts/load_sample_site.py
-    docker compose exec backend python scripts/load_sample_site.py /app/samples/bukit_klangon.tif --name "Bukit Klangon"
+    docker compose exec backend python scripts/load_sample_site.py /app/samples/klangon_dem.tif --name "Bukit Klangon"
 
-Bawaan: /app/samples/bukit_klangon.tif (folder samples/ dipasang read-only
+Bawaan: /app/samples/klangon_dem.tif (folder samples/ dipasang read-only
 oleh docker-compose.yml). Prosesnya beberapa menit, tergantung komputer.
 
 Perhatian: setelah sebuah lokasi baru aktif, backend menghapus berkas lokasi
@@ -34,7 +34,7 @@ sys.path.insert(0, BACKEND_DIR)
 from app.api.v1 import sites  # noqa: E402
 from app.core import database  # noqa: E402
 
-DEFAULT_TIF = "/app/samples/bukit_klangon.tif"
+DEFAULT_TIF = "/app/samples/klangon_dem.tif"
 
 
 async def main(tif: str, name: str, force: bool) -> int:

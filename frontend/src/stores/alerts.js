@@ -1,5 +1,6 @@
 import { defineStore } from "pinia";
 import { acknowledgeAlert, fetchAlerts } from "../services/api";
+import { reconcileAlerts } from "../utils/alerts";
 
 // Alarm yang sudah ditandai "Sudah ditangani" di browser ini. Mencegah respons /alerts yang masih dalam
 // perjalanan (diminta sebelum tombol ditekan) memunculkan lagi alarm tersebut + bunyi ulang.
@@ -25,11 +26,14 @@ export const useAlertStore = defineStore("alerts", {
     // Alarm yang baru ketahuan SETELAH muat awal (SSE sempat putus) ditandai _live -> dibunyikan.
     mergeFromServer(list) {
       if (!Array.isArray(list)) return;
-      const have = new Set(this.alerts.map((a) => a.id));
-      const missing = list.filter((a) => !have.has(a.id) && !acked.has(a.id));
       if (this.loaded) {
-        this.alerts = [...missing.map((a) => ({ ...a, _live: true })), ...this.alerts];
+        // Rekonsiliasi: tambah alarm server yang baru, buang alarm lokal yang sudah di-RESOLVE backend
+        // (daftar server tidak memuatnya lagi) supaya badge "di luar jalur" tidak nyangkut saat siaran
+        // "alert_resolved" terlewat. Logika murni & teruji di utils/alerts.reconcileAlerts.
+        this.alerts = reconcileAlerts(this.alerts, list, acked, Date.now());
       } else {
+        const have = new Set(this.alerts.map((a) => a.id));
+        const missing = list.filter((a) => !have.has(a.id) && !acked.has(a.id));
         this.alerts = [...this.alerts, ...missing];
         this.loaded = true;
       }
@@ -46,9 +50,11 @@ export const useAlertStore = defineStore("alerts", {
       }
     },
     // Dipanggil HANYA dari stream SSE (alarm yang benar-benar baru terjadi).
+    // _liveAt menandai kapan alarm masuk via SSE: dipakai mergeFromServer agar perlindungan dari
+    // pembersihan hanya berlaku sebentar (lihat sana), tidak selamanya.
     addAlert(alert) {
       if (this.alerts.some((a) => a.id === alert.id) || acked.has(alert.id)) return;
-      this.alerts.unshift({ ...alert, _live: true });
+      this.alerts.unshift({ ...alert, _live: true, _liveAt: Date.now() });
     },
     removeBySession(sessionId) {
       this.alerts = this.alerts.filter((a) => a.session_id !== sessionId);

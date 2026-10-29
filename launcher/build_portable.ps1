@@ -58,9 +58,41 @@ if ($LASTEXITCODE -ne 0) { throw "Uji impor gagal: ada pustaka yang kurang atau 
 Write-Host "7/7 Membuat SiLacak.exe (pemicu kecil) ..."
 python -m venv "$tmp\venv"
 & "$tmp\venv\Scripts\pip.exe" install pyinstaller
+# --icon: SiLacak.exe memakai logo aplikasi (bukan ikon Python bawaan) di Explorer, taskbar, dan pintasan.
+$ico = Join-Path $root "frontend\public\LOGO.ico"
 & "$tmp\venv\Scripts\pyinstaller.exe" launcher\stub\run_silacak.py --onefile --console --name SiLacak `
-    --distpath $out --workpath "$tmp\pyi" --specpath $tmp --noconfirm
+    --icon $ico --distpath $out --workpath "$tmp\pyi" --specpath $tmp --noconfirm
 if (-not (Test-Path "$out\SiLacak.exe")) { throw "SiLacak.exe tidak terbentuk" }
 
 Compress-Archive -Path $out -DestinationPath "launcher\dist\SiLacak-windows.zip" -Force
 Write-Host "Selesai: launcher\dist\SiLacak-windows.zip  (uji: ekstrak ke folder BARU lalu klik SiLacak.exe)"
+
+# ── 8/8 (opsional) Membungkus jadi installer .exe (Inno Setup) ───────────────
+# Butuh Inno Setup 6 atau 7 terpasang (ISCC.exe). Bila tidak ada, build portable
+# tetap dianggap sukses; installer hanya dilewati dengan peringatan (T-27).
+Write-Host "8/8 Membuat installer .exe (Inno Setup, opsional) ..."
+$iss = Join-Path $root "launcher\silacak_installer.iss"
+$iscc = $null
+# Cari ISCC.exe di lokasi umum. Pola folder Inno Setup bervariasi: "Inno Setup 7",
+# "Inno Setup 7 (32-bit)", "Inno Setup 6", baik di Program Files maupun per-user
+# (%LOCALAPPDATA%\Programs). Wildcard menangkap semua varian; versi 7 diutamakan.
+foreach ($pat in @("Inno Setup 7*", "Inno Setup 6*")) {
+    foreach ($base in @($env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs")) {
+        if (-not $base) { continue }
+        $hit = Get-ChildItem (Join-Path $base $pat) -Filter ISCC.exe -ErrorAction SilentlyContinue |
+               Select-Object -First 1
+        if ($hit) { $iscc = $hit.FullName; break }
+    }
+    if ($iscc) { break }
+}
+if (-not $iscc) {
+    $cmd = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+    if ($cmd) { $iscc = $cmd.Source }
+}
+if ($iscc) {
+    & $iscc $iss
+    if ($LASTEXITCODE -ne 0) { throw "ISCC (Inno Setup) gagal dengan kode $LASTEXITCODE" }
+    Write-Host "Selesai: launcher\dist\SiLacak-Setup.exe  (installer siap dibagikan)"
+} else {
+    Write-Warning "Inno Setup (ISCC.exe) tidak ditemukan; melewati pembuatan installer. Pasang dari https://jrsoftware.org/isdl.php lalu jalankan ulang skrip ini, atau: ISCC.exe launcher\silacak_installer.iss"
+}

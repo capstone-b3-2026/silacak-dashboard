@@ -7,9 +7,16 @@ const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
 
 class El {
   constructor(tag) { this.tagName = tag.toUpperCase(); this.children = []; this.dataset = {}; this.hidden = false;
-    this.className = ""; this.textContent = ""; this.value = ""; this.onclick = null; }
+    this.className = ""; this.textContent = ""; this.value = ""; this.type = ""; this.onclick = null;
+    this._listeners = {};
+    // style.setProperty dipakai wizard untuk mengisi progres slider; cukup no-op di DOM tiruan.
+    this.style = { setProperty() {} }; }
   appendChild(c) { this.children.push(c); return c; }
   removeChild(c) { this.children.splice(this.children.indexOf(c), 1); return c; }
+  // Wizard memakai addEventListener untuk slider/input/reset. Harness hanya perlu TIDAK melempar dan
+  // menyimpan handler; tes memicu perilaku lewat .value + .onclick, bukan event sintetis.
+  addEventListener(type, fn) { (this._listeners[type] = this._listeners[type] || []).push(fn); }
+  setAttribute(name, val) { if (name === "aria-label") this.ariaLabel = val; else this.dataset[name] = val; }
   get firstChild() { return this.children[0] || null; }
   all(tag) { return this.children.flatMap((c) => (c.tagName === tag ? [c] : []).concat(c.all(tag))); }
 }
@@ -24,7 +31,12 @@ function makeEnv({ routes, path: pathname }) {
   const doc = {
     getElementById: (id) => { if (!els[id]) throw new Error("id tidak ada: " + id); return els[id]; },
     createElement: (t) => new El(t),
-    querySelectorAll: (sel) => { assert.strictEqual(sel, "#fields input"); return els["fields"].all("INPUT"); },
+    querySelectorAll: (sel) => {
+      // Dukung "#fields input" dan "#fields input[type=number]" (wizard memakai yang kedua di collectValues).
+      assert.ok(sel === "#fields input" || sel === "#fields input[type=number]", "selector tak terduga: " + sel);
+      const inputs = els["fields"].all("INPUT");
+      return sel.includes("[type=number]") ? inputs.filter((i) => i.type === "number") : inputs;
+    },
   };
   const fetch = async (url, opts = {}) => {
     const key = (opts.method || "GET") + " " + url;
@@ -56,7 +68,8 @@ const baseRoutes = (state, extra = {}) => Object.assign({
   // 1) "Tidak tahu" -> PUT mode default -> redirect ke "/"
   let e = makeEnv({ routes: baseRoutes({}, { "PUT /api/v1/app-config": [200, { configured: true, fields: FIELDS }] }), path: "/awal" });
   await tick();
-  assert.strictEqual(e.els["fields"].all("INPUT").length, 3, "3 isian harus dirender");
+  // 3 isian angka (tiap field punya input number + slider range kembaran; hitung yang number saja)
+  assert.strictEqual(e.els["fields"].all("INPUT").filter((i) => i.type === "number").length, 3, "3 isian harus dirender");
   assert.strictEqual(e.els["step-form"].hidden, true, "form tersembunyi dulu di /awal");
   e.els["btn-unsure"].onclick(); await tick();
   const put = e.calls.find((c) => c.key === "PUT /api/v1/app-config");
@@ -81,7 +94,7 @@ const baseRoutes = (state, extra = {}) => Object.assign({
   e = makeEnv({ routes: baseRoutes({}, { "PUT /api/v1/app-config": [422, { detail: "'B' harus berupa angka antara 5 dan 500 (meter)." }] }), path: "/pengaturan" });
   await tick();
   assert.strictEqual(e.els["step-form"].hidden, false, "/pengaturan langsung ke form");
-  e.els["fields"].all("INPUT")[1].value = "";
+  e.els["fields"].all("INPUT").filter((i) => i.type === "number")[1].value = "";
   e.els["btn-save"].onclick(); await tick();
   assert.strictEqual(e.calls.filter((c) => c.key === "PUT /api/v1/app-config").pop().body.values.stagnant_radius_m, null);
   assert.ok(e.els["msg"].textContent.includes("harus berupa angka"));

@@ -33,7 +33,7 @@
       @click="enableSound"
     ><svg class="bb-spk" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM16 9a4 4 0 0 1 0 6" /></svg>Aktifkan suara alarm</button>
     <button v-else class="bb-btn ok" type="button" title="Suara alarm aktif. Klik untuk mencoba bunyinya." @click="enableSound">
-      <svg class="bb-spk" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>Alarm aktif
+      <svg class="bb-spk" viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4zM16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12" /></svg>
     </button>
 
     <!-- pemilih port -->

@@ -153,7 +153,7 @@ Setelah layanan `db` sehat dan `backend` berjalan:
 Peta topo offline baru tersedia setelah ada lokasi. Langkah berikutnya:
 
 1. Buka http://localhost:8080, panel Setup, tab "Lokasi dan relay".
-2. Unggah `samples/bukit_klangon.tif` (DEM contoh yang ikut di repositori). Backend membuat ubin 3D dan peta topo offline, jadi tunggu sampai prosesnya selesai. Bila gagal, pesan alasannya tampil di Setup.
+2. Unggah `samples/klangon_dem.tif` (DEM contoh yang ikut di repositori). Backend membuat ubin 3D dan peta topo offline, jadi tunggu sampai prosesnya selesai. Bila gagal, pesan alasannya tampil di Setup.
 3. Setelah peta topo muncul, lanjut dengan penentuan base dan jalur (bagian Cara Penggunaan, langkah A.3 dan seterusnya), lalu isi data sintetis (bagian Data Sintetis) bila belum ada hardware.
 
 DEM contoh mencakup area sekitar 28 x 28 km, jauh lebih luas daripada anjuran potongan 4 x 4 km di bagian Cara Penggunaan. Prosesnya tetap jalan, hanya lebih lama dan menghasilkan lebih banyak ubin daripada DEM yang dipotong sempit.
@@ -203,7 +203,7 @@ Vite berjalan di http://localhost:5173 dan meneruskan `/api` ke http://localhost
 ### A. Persiapan lokasi (sekali per lokasi uji)
 
 1. Buka dashboard, lalu buka panel Setup dan pilih tab "Lokasi dan relay".
-2. Unggah satu berkas DEM GeoTIFF (untuk mencoba, pakai `samples/bukit_klangon.tif`). Backend menormalkan ke EPSG:4326, membuat ubin elevasi untuk 3D dan ubin topo offline. DEM tanpa CRS ditolak bila koordinatnya bukan derajat. Setelah selesai, peta dasar topo offline tersedia. Setelah lokasi baru aktif, berkas lokasi sebelumnya di `data/sites/` dihapus (barisnya di basis data tetap sebagai riwayat).
+2. Unggah satu berkas DEM GeoTIFF (untuk mencoba, pakai `samples/klangon_dem.tif`). Backend menormalkan ke EPSG:4326, membuat ubin elevasi untuk 3D dan ubin topo offline. DEM tanpa CRS ditolak bila koordinatnya bukan derajat. Setelah selesai, peta dasar topo offline tersedia. Setelah lokasi baru aktif, berkas lokasi sebelumnya di `data/sites/` dihapus (barisnya di basis data tetap sebagai riwayat).
 3. Aktifkan mode penempatan base lalu klik titik base station di peta.
 4. Aktifkan mode jalur lalu klik titik-titik jalur pendakian di peta. Tersedia tombol undo titik dan hapus trail. Begitu jalur punya minimal dua titik, railing koridor (dua garis putus-putus amber sekitar 50 m dari jalur) muncul di peta sebagai penanda perimeter deteksi stagnan.
 5. Pada bagian base dan jalur tersedia baris status relay. Bila rencana belum dihitung dan base serta minimal dua titik jalur sudah ada, tombol "Hitung relay" tampil (menjalankan perencana yang sama dengan panel bagian 3). Bila rencana sudah ada, baris itu menampilkan status cakupan ("trail tercover" atau jumlah titik belum tercover) beserta jumlah relay, sehingga operator tidak perlu menggulir ke panel perencana. Isi parameter perencana bila perlu (arti tiap parameter ada di bagian [Perencana Relay](#perencana-relay)), lalu klik "Simpan dan hitung ulang".
@@ -318,7 +318,7 @@ tautan layak  = L_medan <= redaman medan maks  DAN  margin fading >= margin fadi
 - **Jangan kalibrasi dengan data sintetis.** Seeder menghasilkan RSSI karangan; hasilnya tidak berarti.
 - Setelah menerapkan, jalankan kalibrasi lagi: median residu harus mendekati 0.
 
-**Hasil verifikasi (DEM `bukit_klangon.tif`, 7 jalur uji sintetis, hop 2 km, radius 0,45 km):**
+**Hasil verifikasi (DEM `klangon_dem.tif`, 7 jalur uji sintetis, hop 2 km, radius 0,45 km):**
 
 - Semua jalur terjangkau penuh dengan 2 sampai 5 relay. Perencana greedy lama gagal menjangkau penuh 6 dari 7 jalur yang sama (dinilai dengan kriteria baru).
 - Hasil divalidasi dengan penghitung skalar terpisah pada DEM asli, DEM yang dihaluskan ke setara 30 m, dan DEM bergalat acak 3 m: cakupan 100 persen pada dua yang pertama dan paling rendah 99,2 persen pada yang ketiga.
@@ -523,7 +523,11 @@ infra/postgres/
 reference-for-hardware-team/
   serial_to_postgres_bridge.py, README.md
 samples/
-  bukit_klangon.tif          DEM contoh untuk diunggah di Setup (ikut Git)
+  klangon_dem.tif            DEM contoh Bukit Klangon untuk diunggah di Setup (ikut Git)
+  klangon_dem_clip.tif       DEM Klangon versi dipotong kecil (uji cepat)
+  klangon_canopy.tif         raster tinggi kanopi Klangon (opsional, untuk model vegetasi)
+  merapi_dem.tif             DEM contoh Merapi
+  ftugm_dem_test.tif         DEM sintetis mini FT UGM (hanya untuk tes kode, bukan demo peta)
 data/
   .gitkeep                   penjaga folder; isi lain dibuat otomatis dan tidak ikut Git
                              (data/sites/<id>/ berisi DEM dan ubin hasil unggahan)
@@ -595,7 +599,7 @@ Urutan disarankan dari yang paling mendesak.
 ### 1. Verifikasi pertama (sekarang, tanpa hardware tambahan)
 
 - [ ] `docker compose up --build` berhasil, `/health` menjawab, dan skema termigrasi (cek tabel `positions` memiliki kolom `gps_valid`, `gps_flags`, `time_from_gps`).
-- [ ] Unggah `samples/bukit_klangon.tif` di Setup (atau jalankan `scripts/load_sample_site.py`) dan pastikan peta topo offline muncul.
+- [ ] Unggah `samples/klangon_dem.tif` di Setup (atau jalankan `scripts/load_sample_site.py`) dan pastikan peta topo offline muncul.
 - [ ] Jalankan data sintetis, pastikan peta, sesi, dan alarm stagnan berfungsi, lalu `docker compose down -v` untuk membersihkan. Ingat bahwa PDR dan latensi tidak teruji oleh seeder saat ini (G14).
 - [ ] Sambungkan base station dan cek dengan SQL (bagian Mengakses Basis Data) bahwa paket masuk. Temuan dari kode firmware: saat tidak ada fix, firmware mencetak koordinat `0.0000000,0.0000000` (bukan kosong) dan bit `LocationValid` (`gps_flags & 1`) tidak di-set. Parser sekarang memakai bit itu sehingga paket tanpa fix disimpan dengan lokasi NULL; perlu dikonfirmasi dengan data lapangan.
 - [ ] Sinkronkan jam laptop (NTP).
@@ -635,7 +639,7 @@ Urutan disarankan dari yang paling mendesak.
 | Gejala | Kemungkinan penyebab dan langkah |
 |---|---|
 | `docker compose up` gagal karena `backend/.env` tidak ditemukan | Berkas itu tidak ikut Git. Salin dari contoh: `cp backend/.env.example backend/.env`. |
-| Peta topo tidak muncul setelah clone baru | Basis data masih kosong. Lokasi dibaca dari tabel `sites`, jadi berkas di `data/` saja tidak cukup. Unggah `samples/bukit_klangon.tif` di Setup atau jalankan `docker compose exec backend python scripts/load_sample_site.py`. |
+| Peta topo tidak muncul setelah clone baru | Basis data masih kosong. Lokasi dibaca dari tabel `sites`, jadi berkas di `data/` saja tidak cukup. Unggah `samples/klangon_dem.tif` di Setup atau jalankan `docker compose exec backend python scripts/load_sample_site.py`. |
 | `load_sample_site.py` melapor "Berkas tidak ditemukan" | Volume `samples` belum terpasang di container. Jalankan `docker compose up -d` agar container dibuat ulang, dan pastikan folder `samples/` ada di root repositori. |
 | Posisi tidak muncul padahal bridge berjalan | Baca keluaran bridge: baris dengan kurang dari 18 field ditolak. Cek apakah Node ID itu didaftarkan sebagai `relay` atau `base` di Setup (paketnya diabaikan). Cek dengan SQL bagian Mengakses Basis Data. |
 | Marker diam di lokasi lama dan ada lencana "gps invalid" | Paket terbaru tanpa fix atau Nsat di bawah 4 atau HDOP di atas 5. Marker tetap di lokasi fix terakhir. Itu perilaku yang dirancang. |

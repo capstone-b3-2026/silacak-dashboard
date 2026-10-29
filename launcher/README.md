@@ -47,6 +47,25 @@ Hasil: `launcher\dist\SiLacak-windows.zip`. Uji dengan mengekstraknya ke folder 
 Cadangan: `build_windows.ps1` (PyInstaller penuh; spec `silacak.spec`). Binary PostgreSQL portable diletakkan manual di `launcher/third_party/pgsql`
 (tidak dimasukkan ke repo). Tidak perlu PostGIS maupun TimescaleDB.
 
+## Installer .exe (Inno Setup) -- T-27
+Agar operator cukup "unduh satu `.exe`, klik, pilih folder, selesai" (bukan ekstrak zip), paket portable di atas dibungkus menjadi
+`SiLacak-Setup.exe` dengan Inno Setup. Skripnya `launcher\silacak_installer.iss`.
+
+Sifat installer:
+- Per-user (`PrivilegesRequired=lowest`): tidak butuh hak admin; default folder `%LOCALAPPDATA%\Programs\SiLacak`, tetapi pengguna boleh memilih folder lain.
+- Opsi centang "Buat pintasan di Desktop" dan pintasan Start Menu.
+- Uninstaller dengan ikon aplikasi (`frontend\public\LOGO.ico`).
+- **Tidak memuat `.env`** (mode portable memakai `config.json` di `%LOCALAPPDATA%\SiLacak`).
+- Uninstaller **tidak** menghapus data operator di `%LOCALAPPDATA%\SiLacak` (database, DEM, pengaturan); hanya berkas program yang dibuang. Install ulang tetap melihat data lama.
+
+Prasyarat build: **Inno Setup 6** terpasang (`ISCC.exe`, unduh gratis dari <https://jrsoftware.org/isdl.php>). `build_portable.ps1` memanggil `ISCC.exe` otomatis pada langkah 8/8 bila ditemukan; bila tidak terpasang, pembuatan installer dilewati dengan peringatan dan zip portable tetap dihasilkan. Membuat installer secara manual:
+```
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" launcher\silacak_installer.iss
+```
+Hasil: `launcher\dist\SiLacak-Setup.exe`. Uji round trip di Windows bersih: jalankan installer -> `SiLacak.exe` jalan -> uninstall -> pastikan folder program bersih dan `%LOCALAPPDATA%\SiLacak` tetap ada.
+
+Tingkat bukti: skrip ditulis (T1). Build dan uji installer hanya bisa dilakukan di Windows (T2/T3) oleh pemilik.
+
 ## Status pengujian (jujur)
 Teruji otomatis (`python -m unittest discover -s launcher/tests`): config, pemilihan port, perintah initdb/pg_ctl/createdb
 dengan proses di-fake. **Belum pernah dijalankan**: initdb/pg_ctl asli, build PyInstaller (hidden import rasterio/uvicorn/asyncpg
@@ -59,5 +78,5 @@ dan paket hilang). Backend membukanya seperti port serial (`socket://127.0.0.1:7
 auto-reconnect ikut teruji. Tidak teruji: kabel USB, driver CH340/CP210x, dan radio LoRa. Langkahnya ada di docstring skrip itu.
 
 ## Belum ada (Fase 2/3)
-Tombol "Pengaturan" di dalam dashboard Vue (sekarang hanya lewat alamat /pengaturan), ekspor/impor "paket lokasi", ikon tray, installer, bundel driver USB (CP210x/CH340),
-pipeline rilis, penanganan SmartScreen.
+Tombol "Pengaturan" di dalam dashboard Vue (sekarang hanya lewat alamat /pengaturan), ekspor/impor "paket lokasi", ikon tray, bundel driver USB (CP210x/CH340),
+pipeline rilis, penanganan SmartScreen. (Installer `.exe` sudah ada skripnya -- lihat bagian "Installer .exe" di atas -- tetapi belum diuji build/round trip di Windows.)
