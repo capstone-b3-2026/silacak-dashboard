@@ -219,7 +219,9 @@ async function choose(port) {
 .bb-status.bad { background: var(--amber); color: var(--on-amber); padding: 2px 8px; }
 .bb-status.bad .bb-dot { background: var(--on-amber); }
 .bb-status.off { color: var(--text-2); }
-.bb-icon { display: none; }
+.bb-icon { display: inline-flex; align-items: center; justify-content: center; font-weight: 800; font-size: 12px; line-height: 1; }
+/* titik kecil cukup untuk state biasa; saat "bad" ikon sudah cukup kuat jadi titik disembunyikan agar tidak dobel */
+.bb-status.bad .bb-dot { display: none; }
 .bb-port { font-weight: 600; opacity: 0.9; font-size: 11px; }
 .bb-last { color: var(--text-2); font-size: 11px; line-height: 1.2; white-space: nowrap; }
 .bb-sep { display: none; }

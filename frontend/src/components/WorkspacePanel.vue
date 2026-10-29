@@ -43,8 +43,6 @@
         </div>
       </div>
 
-      <DataPanel v-if="uiStore.advanced" />
-
       <!-- Tren sinyal: RSSI & tunda data diambil dari log paket pendaki terpilih (diagStore.trend, diperbarui tiap 5 dtk) -->
       <div v-if="uiStore.advanced" class="pnl">
         <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M2 12h4l3-8 4 16 3-8h6" /></svg>Tren sinyal</div><div class="sv">{{ trendLabel }}</div></div>
@@ -71,20 +69,9 @@
         </div>
       </div>
 
-      <!-- legenda peta (dulu satu kartu dengan "Parameter radio"; kartu parameter radio sudah dihapus) -->
-      <div v-if="uiStore.advanced" class="pnl">
-        <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M12 8v4M12 16h.01" /></svg>Legenda peta</div></div>
-        <div class="pb">
-          <div class="lgnd">
-            <div class="lg"><span class="sw circle" style="background: var(--marker)"></span>Pendaki</div>
-            <div class="lg"><span class="sw circle" style="background: var(--red)"></span>SOS</div>
-            <div class="lg" :class="{ dim: !relayActive }"><span class="sw circle" style="background: var(--violet)"></span>Relay</div>
-            <div class="lg" :class="{ dim: !baseActive }"><span class="sw circle" style="background: var(--green)"></span>Base</div>
-            <div class="lg" :class="{ dim: !linkKuatActive }"><span class="sw line" style="background: var(--green)"></span>Link kuat</div>
-            <div class="lg" :class="{ dim: !linkMarginalActive }" title="Garis oranye di peta: tautan relay dengan sinyal pas-pasan (fade margin tipis). Hijau = kuat."><span class="sw line" style="background: var(--amber)"></span>Link marginal</div>
-          </div>
-        </div>
-      </div>
+
+      <DataPanel v-if="uiStore.advanced" />
+
     </div>
   </aside>
 </template>
@@ -95,7 +82,6 @@ import { useHikerStore } from "../stores/hikers";
 import { useAlertStore } from "../stores/alerts";
 import SessionsPanel from "./SessionsPanel.vue";
 import { useDiagnosticsStore } from "../stores/diagnostics";
-import { useSiteStore } from "../stores/site";
 import { useUiStore } from "../stores/ui";
 import StartGuide from "./StartGuide.vue";
 import DataPanel from "./DataPanel.vue";
@@ -106,7 +92,6 @@ const alertStore = useAlertStore();
 const collapsed = ref(false);
 const showGuide = ref(false);
 const diagStore = useDiagnosticsStore();
-const siteStore = useSiteStore();
 const uiStore = useUiStore();
 const pdr = computed(() => diagStore.pdrOverall);
 const lat = computed(() => diagStore.latencyMedianS);
@@ -163,27 +148,7 @@ const latEmptyText = computed(() =>
     : "Belum ada data telemetri link yang masuk"
 );
 
-// ── Keadaan legenda peta ──
-// Suffix "(belum ada data)" dan class "dim" hanya muncul saat elemen itu BELUM ada di peta.
-// Sumbernya rencana lokasi (siteStore) — sama dengan yang digambar MapView.siteGeo, bukan telemetri paket.
-const baseActive = computed(() => !!siteStore.site?.base || diagStore.baseSet);
-const planRelays = computed(() => siteStore.site?.plan?.relays || []);
-const relayActive = computed(() => planRelays.value.length > 0);
-// Garis link hanya tergambar bila base ter-set DAN ada minimal satu relay (MapView.siteGeo: st?.base && relays.length).
-const linksDrawn = computed(() => baseActive.value && relayActive.value);
-// Klasifikasi kuat vs marginal mengikuti logika MapView.siteGeo: fade_margin_db < ambang params => marginal.
-const fadeThreshold = computed(() => siteStore.site?.params?.fade_margin_db ?? 10);
-const isMarginal = (r) => {
-  if (r.link_ok === false) return false; // link tak-layak dirender merah, bukan marginal
-  if (r.fade_margin_db != null) return r.fade_margin_db < fadeThreshold.value;
-  const loss = r.loss_db ?? (r.margin_m < 3 ? 6 : 0); // rencana lama hanya punya margin
-  return loss > 3;
-};
-const linkKuatActive = computed(() => linksDrawn.value && planRelays.value.some((r) => r.link_ok !== false && !isMarginal(r)));
-const linkMarginalActive = computed(() => linksDrawn.value && planRelays.value.some((r) => isMarginal(r)));
-
-// Legenda: item yang belum ada datanya cukup di-dim (lihat .lg.dim), tanpa teks "(belum ada data)"
-// yang dulu bikin baris terlihat seperti rusak. Arti tiap item ada di tooltip (title).
+// Legenda peta dipindah dari panel ini ke popover di MapView.vue.
 </script>
 
 <style scoped>

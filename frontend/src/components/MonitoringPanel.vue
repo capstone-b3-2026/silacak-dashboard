@@ -25,11 +25,6 @@
                   <!-- Badge status pendaki dikumpulkan di kolom kiri (di bawah trail) supaya tidak menumpuk
                        di kolom kanan dan menekan angka baterai. Badge utama DINAMIS: kondisi terburuk aktual
                        (SOS merah > di luar jalur / tidak terdengar amber > Normal hijau). -->
-                  <div class="selc-badges">
-                    <span v-if="hikerStore.selectedCode" class="bdg" :class="statusFor(hikerStore.selectedCode).cls">{{ selStatusLabel }}</span>
-                    <span v-if="selDiag?.stale" class="bdg warn" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
-                    <span v-if="selected.gps_valid === false" class="bdg neutral" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta = lokasi terakhir">GPS tidak valid · lokasi terakhir</span>
-                  </div>
                 </div>
                 <div class="selc-side">
                   <div class="selc-batt" :class="battClass(selected.battery_pct)">
@@ -38,6 +33,12 @@
                   </div>
                   <div class="selc-seen">{{ fmtTime(selected.recorded_at) }} · terakhir terlihat</div>
                 </div>
+              </div>
+
+              <div class="selc-badges" style="padding: 14px 0 0 0">
+                <span v-if="hikerStore.selectedCode" class="bdg" :class="statusFor(hikerStore.selectedCode).cls">{{ selStatusLabel }}</span>
+                <span v-if="selDiag?.stale" class="bdg warn" :title="`tidak ada paket > ${selDiag.stale_after_s ?? diagStore.staleAfterS} dtk`">Tidak terdengar {{ fmtAge(selDiag.silent_s) }}</span>
+                <span v-if="selected.gps_valid === false" class="bdg neutral" title="Satelit < 4, ketelitian GPS (HDOP) > 5, atau tanpa fix: posisi di peta memakai lokasi terakhir yang valid">GPS tidak valid</span>
               </div>
 
               <div class="selc-grid primary">

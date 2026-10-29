@@ -16,7 +16,7 @@
 
     <!-- ═════════ TAB LOKASI ═════════ -->
     <div v-if="tab === 'site' && !showAdvanced" class="sb">
-      <p v-if="site.error" class="err">{{ site.error }}</p>
+      <p v-if="site.error" class="err" style="margin: 6px 12px">{{ site.error }}</p>
 
       <!-- 1. DEM -->
       <section class="pnl">
@@ -165,17 +165,21 @@
 
     <!-- ═════════ TAB PERANGKAT ═════════ -->
     <div v-else class="sb">
-      <p v-if="dev.error" class="err">{{ dev.error }}</p>
+      <p v-if="dev.error" class="err" style="margin: 6px 12px">{{ dev.error }}</p>
+      <!--
       <p v-if="!cfgOn" class="hint" style="padding: 14px 0 0 14px">
         Push konfigurasi dimatikan: firmware base saat ini belum menerima perintah dari dashboard, jadi nilai di bawah hanya
         tersimpan sebagai katalog di dashboard dan tidak mengubah alat.
       </p>
+      -->
 
       <section class="pnl">
         <div class="ph"><span class="tl">Daftar perangkat</span>
+          <!--
           <button class="btn sm" :disabled="!cfgOn || !dev.outOfSync.length || dev.busy" @click="dev.pushAll()">
             Push semua ({{ dev.outOfSync.length }})
           </button>
+          -->
         </div>
         <div class="pb">
           <p v-if="!dev.devices.length" class="hint">Belum ada perangkat. Tambahkan di bawah.</p>
@@ -183,11 +187,15 @@
             <div class="dev-top">
               <span class="nid">{{ d.node_id }}</span>
               <div class="grow"><b>{{ d.name }}</b><span class="lbl">{{ d.role }}<template v-if="d.hiker_code"> · {{ d.hiker_code }}</template></span></div>
+              <!-- 
               <span class="chip" :class="syncClass(d)">{{ syncLabel(d) }}</span>
+              -->
             </div>
+            <!--
             <div class="dev-cfg">
               lapor {{ d.config.report_interval_s }} dtk · TX {{ d.config.tx_power_dbm }} dBm · {{ d.config.air_data_rate }} kbps
             </div>
+            -->
             <div v-if="d.role === 'relay'" class="dev-slot">
               <span class="lbl">Dipasang di posisi</span>
               <select
@@ -221,6 +229,7 @@
             <select class="inp" v-model="form.role"><option>tracker</option><option>relay</option><option>base</option></select>
           </label>
           <label class="wide"><span class="lbl">Nama</span><input class="inp" v-model="form.name" placeholder="mis. Tracker Andi" /></label>
+          <!-- 
           <label><span class="lbl">Interval lapor (dtk)<ParamTip>Selang node mengirim posisi. MISMATCH: firmware _optimized mengirim kontinu (jeda minimum 300 ms), _real tiap 5000 ms; angka '30 dtk' TIDAK ada di firmware. Lagipula downlink konfigurasi belum dimengerti firmware, jadi nilai ini BELUM sampai ke alat.</ParamTip></span><input class="inp" type="number" v-model.number="form.config.report_interval_s" /></label>
           <label><span class="lbl">TX power (dBm)<ParamTip>Daya pancar node. MISMATCH: alat memakai POWER_22 = 22 dBm hardcoded; batas form ini (2–20) bahkan tak bisa mencapai 22. Downlink konfigurasi belum jalan, jadi nilai ini BELUM mengubah alat.</ParamTip></span><input class="inp" type="number" v-model.number="form.config.tx_power_dbm" /></label>
           <label><span class="lbl">Air data rate<ParamTip>Laju data radio gabungan modul E220. Pada E220 (chip LLCC68), SF, bandwidth, dan coding rate TIDAK bisa diatur terpisah — hanya satu setelan air data rate. Firmware saat ini memakai 2,4 kbps (AIR_DATA_RATE_010_24); nilai lebih rendah = jangkauan/ketahanan lebih baik tetapi lebih lambat. C-251 §2.2.1 membahas SF5–SF11 sebagai konsep simulasi, bukan knob terpisah di modul ini. MISMATCH: downlink konfigurasi belum dimengerti firmware, jadi nilai ini masih katalog dashboard dan BELUM sampai ke alat.</ParamTip></span>
@@ -228,16 +237,19 @@
               <option v-for="r in AIR_DATA_RATES" :key="r" :value="r">{{ r }} kbps</option>
             </select>
           </label>
+          -->
           <div class="row wide">
             <button class="btn primary grow" :disabled="dev.busy || !form.name || !form.node_id" @click="submit">
               {{ editId ? "Simpan perubahan" : "Tambah" }}
             </button>
             <button v-if="editId" class="btn" @click="resetForm">Batal</button>
           </div>
+          <!--
           <p class="hint wide">
             Menyimpan hanya mengubah data di dashboard. <b>Push</b> memasukkan perintah ke antrean; bridge serial di PC base
             yang mengirimnya ke alat dan mengonfirmasi balik. Tanpa bridge yang jalan, status tertahan di “menunggu bridge”.
           </p>
+          -->
         </div>
       </section>
     </div>

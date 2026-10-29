@@ -328,8 +328,10 @@ html, body { height: 100%; overflow: hidden; background: var(--bg); color: var(-
 .selc-id { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .selc-id strong { font-family: var(--font-head); font-size: 24px; font-weight: 800; color: var(--text); }
 .selc-trail { font-size: 13px; color: var(--text-2); }
-/* Badge status pendaki di kolom kiri (di bawah trail): baris yang bisa wrap, rapat, tidak menekan kolom kanan. */
-.selc-badges { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+/* Badge status pendaki di kolom kiri (di bawah trail): satu baris yang bisa wrap, rapat,
+   tidak menekan kolom kanan. Badge di sini dibuat lebih kecil dari .bdg umum supaya muat sebaris. */
+.selc-badges { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; margin-top: 4px; }
+.selc-badges .bdg { font-size: 12px; padding: 1px 8px; }
 .selc-side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex-shrink: 0; }
 .selc-batt { display: flex; flex-direction: column; align-items: flex-end; margin-top: 3px; }
 .selc-batt strong { font-family: var(--font-head); font-size: 26px; font-weight: 800; line-height: 1; color: var(--text); }

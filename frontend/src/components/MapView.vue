@@ -30,6 +30,26 @@
     >{{ uiStore.advanced ? "Mode lanjutan" : "Mode harian" }}</button>
   </div>
 
+  <!-- Legenda peta: dipindah dari panel kiri ke popover di pojok kiri-bawah peta supaya tidak
+       memakan ruang panel. Isi = referensi arti warna penanda & garis (selalu penuh, tanpa dim). -->
+  <div class="map-legend floating" ref="legendRef">
+    <button
+      class="mbtnn legend-btn" type="button" :aria-expanded="showLegend"
+      aria-haspopup="dialog" @click="showLegend = !showLegend"
+      title="Arti warna penanda &amp; garis di peta" aria-label="Legenda peta"
+    >Legenda</button>
+    <div v-if="showLegend" class="legend-pop" role="dialog" aria-label="Legenda peta">
+      <div class="lgnd">
+        <div class="lg"><span class="sw circle" style="background: var(--marker)"></span>Pendaki</div>
+        <div class="lg"><span class="sw circle" style="background: var(--red)"></span>SOS</div>
+        <div class="lg"><span class="sw circle" style="background: var(--violet)"></span>Relay</div>
+        <div class="lg"><span class="sw circle" style="background: var(--green)"></span>Base</div>
+        <div class="lg"><span class="sw line" style="background: var(--green)"></span>Link kuat</div>
+        <div class="lg" title="Garis oranye di peta: tautan relay dengan sinyal pas-pasan (fade margin tipis). Hijau = kuat."><span class="sw line" style="background: var(--amber)"></span>Link marginal</div>
+      </div>
+    </div>
+  </div>
+
   <div v-if="is3d" class="map-hint floating">
     Geser kanan / Ctrl + geser = putar &amp; miringkan · dua jari di layar sentuh
   </div>
@@ -49,6 +69,7 @@ import { useHikerStore } from "../stores/hikers";
 import { useAlertStore } from "../stores/alerts";
 import { useSiteStore } from "../stores/site";
 import { useDeviceStore } from "../stores/devices";
+import { useSessionStore } from "../stores/sessions";
 import { useUiStore } from "../stores/ui";
 import { buildRoute, routeFeatureCollection, trailCorridor, unresolvedMessage } from "../utils/routeGeo";
 
@@ -61,7 +82,10 @@ const alertStore = useAlertStore();
 const siteStore = useSiteStore();
 const uiStore = useUiStore();
 const deviceStore = useDeviceStore(); // untuk memetakan ID relay di route_path ke posisinya
+const sessionStore = useSessionStore(); // untuk menampilkan NAMA pendaki (bukan sekadar kode alat) di popup/tooltip
 const is3d = ref(false);
+const showLegend = ref(false); // popover legenda peta
+const legendRef = ref(null); // wadah tombol+popover legenda (untuk deteksi klik di luar)
 let map = null;
 let mapReady = false;
 let popup = null;
@@ -87,6 +111,14 @@ function toggleMode() {
 
 const pendakiAktif = computed(() => Object.keys(hikerStore.hikers).length);
 
+// Tutup popover legenda saat klik di luar wadahnya atau tekan Esc.
+function onDocPointerDown(e) {
+  if (showLegend.value && legendRef.value && !legendRef.value.contains(e.target)) showLegend.value = false;
+}
+function onDocKeydown(e) {
+  if (e.key === "Escape") showLegend.value = false;
+}
+
 // Sebelum ada DEM aktif, peta mulai di sini. Begitu DEM siap, peta otomatis
 // pindah & dikunci ke cakupan DEM-nya.
 const START_CENTER = [110.453, -7.578];
@@ -111,10 +143,32 @@ function markerHtml(code, sos, selected) {
   return `<div class="mk-wrap">${ring}<div class="mk-h${sos ? " sos" : ""}${selected ? " selected" : ""}">${label}</div></div>`;
 }
 
+// Pemetaan kode alat -> nama pendaki, pola sama seperti MonitoringPanel. Sesi yang dibuka otomatis
+// (alat kirim data sebelum check-in) full_name-nya kosong -> jatuh ke kode.
+const codeToName = computed(() => {
+  const m = {};
+  for (const s of sessionStore.active) {
+    if (s.hiker_code && s.full_name) m[s.hiker_code] = s.full_name;
+  }
+  return m;
+});
+// Nama pendaki bila ada, selain itu null (pemanggil pakai kode alat sebagai judul cadangan).
+function nameFor(code) {
+  return (code && codeToName.value[code]) || null;
+}
+
+// Teks dari server (nama pendaki, kode) tidak boleh masuk innerHTML mentah. Popup MapLibre memakai
+// setHTML, jadi escape dulu karakter yang bisa jadi tag/atribut sebelum disisipkan ke string HTML.
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
 function popupHtml(code, h, sos) {
-  const bat = h.battery_pct != null ? `<br>bat ${h.battery_pct}%` : "";
   const alt = h.elevation != null ? `<br>${h.elevation} m` : "";
-  return `<b>${code}</b>${sos ? " (SOS)" : ""}${alt}${bat}`;
+  const name = nameFor(code);
+  // Judul = nama pendaki bila sudah check-in; kode alat jadi subjudul kecil. Tanpa nama: kode saja.
+  const title = name ? `<b>${esc(name)}</b><br><span class="pp-code">${esc(code)}</span>` : `<b>${esc(code)}</b>`;
+  return `${title}${sos ? " (SOS)" : ""}${alt}`;
 }
 
 function rasterPaint() {
@@ -206,7 +260,9 @@ function syncMarkers() {
     }
     m.marker.setLngLat([h.lon, h.lat]);
     m.el.innerHTML = markerHtml(code, sos, selected);
-    m.el.title = `${code}${h.elevation != null ? ` · ${h.elevation} m` : ""}`;
+    // el.title = atribut DOM (teks murni, otomatis aman). Nama pendaki bila ada, lalu kode alat.
+    const nm = nameFor(code);
+    m.el.title = `${nm ? nm + " · " : ""}${code}${h.elevation != null ? ` · ${h.elevation} m` : ""}`;
   }
   for (const code in markers) {
     if (!seen.has(code)) {
@@ -525,9 +581,14 @@ onMounted(() => {
     if (siteStore.editMode) return siteStore.handleMapClick(e.lngLat.lat, e.lngLat.lng);
     hikerStore.clearSelection();
   });
+
+  document.addEventListener("pointerdown", onDocPointerDown);
+  document.addEventListener("keydown", onDocKeydown);
 });
 
 onBeforeUnmount(() => {
+  document.removeEventListener("pointerdown", onDocPointerDown);
+  document.removeEventListener("keydown", onDocKeydown);
   map?.remove();
   map = null;
   mapReady = false;
@@ -576,8 +637,20 @@ watch(
 .on3d { color: var(--blue-fg) !important; }
 .warn-toast { color: var(--text); border-color: var(--accent); }
 .mbtnn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Legenda peta: tombol di pojok kiri-bawah area peta (di dalam tepi kiri peta), popover buka ke atas.
+   --lw = lebar sidebar kiri; peta mulai di calc(--lw + 2*--edge). z-index 30 = selevel .map-ctl. */
+.map-legend { bottom: calc(var(--edge) + 44px); left: calc(var(--lw) + 2 * var(--edge) + 8px); z-index: 30; background: transparent; border: 0; }
+.legend-btn { height: 34px; padding: 0 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; font-size: 13px; font-weight: 600; color: var(--text-2); }
+.legend-btn:hover { color: var(--text); }
+.legend-pop { position: absolute; bottom: calc(100% + 8px); left: 0; min-width: 160px; padding: 10px 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--rs); box-shadow: var(--shadow-pop); }
+
+/* Subjudul kode alat di popup pendaki. Popup MapLibre di luar scope komponen -> :deep. */
+:deep(.pp-code) { font-size: 12px; color: var(--muted); font-weight: 700; }
+
 @media (max-width: 1100px) {
   #map { position: relative !important; inset: auto; margin: 8px; min-height: 52vh; }
   .map-empty, .map-hint { left: 50%; }
+  .map-legend { left: 16px; }
 }
 </style>
