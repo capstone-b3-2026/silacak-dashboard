@@ -22,6 +22,7 @@ from app.core import database
 from app.core.config import settings
 from app.repositories import alert_repo, relay_repo
 from app.services import base_protocol as bp
+from app.services.serial_timing import TimingBuffer
 from app.services.notifier import notifier
 
 log = logging.getLogger("silacak.serial")
@@ -73,6 +74,8 @@ class SerialIngest:
         self._relay_reports = 0       # CSV_RELAY_BATTERY yang berhasil disimpan
         self._last_relay_at: datetime | None = None
         self._last_packet_at: datetime | None = None
+        self._duplicates = 0          # paket ganda yang ditolak indeks uq_positions_packet (tidak disimpan ulang)
+        self._timing = TimingBuffer()  # ukur penumpukan base -> baca serial (lihat services/serial_timing.py)
         self._cache: dict[int, tuple[float, int | None, str | None]] = {}  # node_id -> (exp, hiker_id, role)
 
         self._raw_fh = None
@@ -126,6 +129,7 @@ class SerialIngest:
             "candidates": [{"device": c["device"], "description": c["description"]} for c in self._candidates],
             "packets_received": self._packets,
             "packets_rejected": self._rejected,
+            "packets_duplicate": self._duplicates,
             "last_packet_at": self._last_packet_at.isoformat() if self._last_packet_at else None,
             "last_error": self._last_error,
             "raw_log": settings.raw_log,
@@ -133,6 +137,10 @@ class SerialIngest:
             "relay_reports": self._relay_reports,
             "last_relay_at": self._last_relay_at.isoformat() if self._last_relay_at else None,
         }
+
+    def timing_stats(self) -> dict:
+        """Analisis penumpukan paket antara penerimaan radio di base dan pembacaan serial (GET /diagnostics/serial-timing)."""
+        return self._timing.stats()
 
     def set_port(self, port: str) -> None:
         """Pilih port ('COM5') atau kembali ke deteksi otomatis ('auto'); disimpan untuk start berikutnya."""
@@ -213,8 +221,14 @@ class SerialIngest:
         try:
             while not self._stop.is_set() and not self._reconnect.is_set():
                 raw = ser.readline().decode("utf-8", errors="replace").strip()
+                # Catat SEGERA setelah baris terbaca (sebelum parse/DB), supaya waktu ini = saat laptop menerima baris.
+                read_mono, read_wall = time.monotonic(), datetime.now(timezone.utc)
                 if raw:
-                    self._on_raw(raw)
+                    try:
+                        backlog = int(ser.in_waiting)  # byte yang masih menunggu di buffer serial: >0 = laptop tertinggal
+                    except Exception:  # noqa: BLE001 - tidak semua driver/URL handler punya in_waiting
+                        backlog = None
+                    self._on_raw(raw, read_mono, read_wall, backlog)
         finally:
             self._ser = None
             try:
@@ -237,7 +251,8 @@ class SerialIngest:
         self._raw_fh.write(f"{now.isoformat()},{raw}\n")
         self._raw_fh.flush()
 
-    def _on_raw(self, raw: str) -> None:
+    def _on_raw(self, raw: str, read_mono: float | None = None, read_wall: datetime | None = None,
+                backlog: int | None = None) -> None:
         if raw.startswith("CFG_ACK,"):
             self._submit(self._handle_ack(raw))
             return
@@ -264,7 +279,7 @@ class SerialIngest:
                 self._write_raw(raw)
             except OSError as exc:
                 log.warning("Gagal menulis log mentah: %s", exc)
-        self._submit(self._handle_line(raw), wait=True)
+        self._submit(self._handle_line(raw, read_mono, read_wall, backlog), wait=True)
 
     def _submit(self, coro, wait: bool = False) -> None:
         if self._loop is None or self._loop.is_closed():
@@ -278,13 +293,20 @@ class SerialIngest:
                 log.warning("Gagal memproses paket: %s", exc)
 
     # ── sisi async: tulis ke DB ───────────────────────────────────────────────
-    async def _handle_line(self, raw: str) -> None:
+    async def _handle_line(self, raw: str, read_mono: float | None = None, read_wall: datetime | None = None,
+                           backlog: int | None = None) -> None:
+        t0 = read_mono if read_mono is not None else time.monotonic()
         row = bp.parse_csv_data(raw)
         rec = bp.to_record(row) if row else None
         if rec is None:
             self._rejected += 1
             return
-        await self._store(rec)
+        await self._store(rec, read_wall)
+        try:  # jam base saat paket diterima radio (firmware: base_received_uptime_ms); tidak ada = firmware lama
+            base_ms = int(row.get("base_received_uptime_ms", ""))
+        except (TypeError, ValueError):
+            base_ms = None
+        self._timing.add(t0, base_ms, backlog, (time.monotonic() - t0) * 1000.0)
 
     async def _handle_aux(self, raw: str) -> None:
         """Baterai relay / RSSI per hop / reboot pendaki. Gagal di sini TIDAK boleh mengganggu aliran CSV_DATA."""
@@ -332,7 +354,7 @@ class SerialIngest:
                 f"H{t['node_id']:02d}", t["sequence"], t["rtt_ms"],
             )
 
-    async def _store(self, rec: bp.PositionRecord) -> None:
+    async def _store(self, rec: bp.PositionRecord, read_wall: datetime | None = None) -> None:
         pool = database.pool
         if pool is None:
             return
@@ -353,21 +375,26 @@ class SerialIngest:
             _, hiker_id, role = hit
             if role in ("relay", "base") or hiker_id is None:
                 return  # relay/base bukan pendaki: jangan jadi jejak/sesi/alarm SOS
-            await conn.execute(
+            status = await conn.execute(
                 """
                 INSERT INTO positions
                     (hiker_id, location, elevation, hop_count, route_path, sequence, rssi_dbm, satellites, hdop,
-                     missing_since_previous, total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, speed_kph, battery_pct, sos)
+                     missing_since_previous, total_missing, recorded_at, gps_valid, gps_flags, time_from_gps, speed_kph, battery_pct, sos,
+                     serial_read_at)
                 VALUES
                     ($1, CASE WHEN $2::float8 IS NULL OR $3::float8 IS NULL THEN NULL
                               ELSE point($2::float8, $3::float8) END,
-                     $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                     $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+                ON CONFLICT DO NOTHING  -- paket ganda (uq_positions_packet) tidak disimpan ulang & tidak memicu NOTIFY/SSE
                 """,
                 hiker_id, rec.lon, rec.lat, rec.elevation, rec.hop_count, rec.route_path, rec.sequence,
                 rec.rssi_dbm, rec.satellites, rec.hdop, rec.missing_since_previous, rec.total_missing,
                 rec.recorded_at, rec.gps_valid, rec.gps_flags, rec.time_from_gps, rec.speed_kph,
-                rec.battery_pct, rec.sos,
+                rec.battery_pct, rec.sos, read_wall,
             )
+        if isinstance(status, str) and status.endswith(" 0"):  # "INSERT 0 0" = ditolak sebagai paket ganda
+            self._duplicates += 1
+            return
         self._packets += 1
         self._last_packet_at = datetime.now(timezone.utc)
 

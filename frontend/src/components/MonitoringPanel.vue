@@ -114,6 +114,32 @@
         <div v-if="activeTab === 'links'" class="pnl pnl-fill">
           <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0" /><circle cx="12" cy="12" r="1" /></svg>Link radio aktif</div><div class="sv">{{ diagStore.list.length }}</div></div>
           <div class="pb" style="overflow-y: auto; flex: 1; min-height: 0">
+            <!-- Kesehatan jalur data di sisi laptop: jam, penumpukan serial, dan waktu sampai ke layar -->
+            <div v-if="showClockWarn || showSerial || probeReady" class="lnkl" style="margin-bottom: 6px">
+              <div v-if="showClockWarn" class="lnk">
+                <div class="etit"><span>Jam laptop tidak sinkron</span><span class="bdg warn">Periksa</span></div>
+                <div class="emeta">{{ diagStore.clock.message }}</div>
+              </div>
+              <div v-if="showSerial" class="lnk">
+                <div class="etit"><span>Penumpukan paket di serial</span><span class="bdg" :class="serialBadge.cls">{{ serialBadge.label }}</span></div>
+                <div class="emeta">
+                  {{ diagStore.serialTiming.explanation }}
+                  Tunda ekstra: median {{ fmtSec(diagStore.serialTiming.tunda_ekstra_s?.p50) }}, p95 {{ fmtSec(diagStore.serialTiming.tunda_ekstra_s?.p95) }}, maks {{ fmtSec(diagStore.serialTiming.tunda_ekstra_s?.max) }}
+                  ({{ diagStore.serialTiming.terkumpul?.kejadian ?? 0 }} kali paket tiba berkelompok).
+                </div>
+              </div>
+              <div v-if="probeReady" class="lnk">
+                <div class="etit">
+                  <span>Waktu sampai ke layar</span>
+                  <button class="bdg neutral" type="button" style="cursor: pointer" @click="downloadProbeCsv" title="Unduh data mentah untuk laporan">Unduh CSV</button>
+                </div>
+                <div class="emeta">
+                  Dari masuk database sampai tergambar: median {{ fmtMs(probe.db_to_render_s.p50) }}, p95 {{ fmtMs(probe.db_to_render_s.p95) }} ({{ probe.db_to_render_s.n }} paket).
+                  Rinci (median): database ke SSE {{ fmtMs(probe.db_to_sse_s?.p50) }}, SSE ke layar {{ fmtMs(probe.sse_to_render_s?.p50) }}.
+                  <template v-if="diagStore.clock?.status === 'ok' && probe.gps_to_render_s">Dari jam GPS pendaki: median {{ fmtSec(probe.gps_to_render_s.p50) }}, p95 {{ fmtSec(probe.gps_to_render_s.p95) }}.</template>
+                </div>
+              </div>
+            </div>
             <div v-if="!diagStore.list.length" class="empty">Belum ada paket masuk dari sesi aktif</div>
             <div v-else class="lnkl">
               <div v-for="d in diagStore.list" :key="d.session_id" class="lnk" style="cursor: pointer" @click="hikerStore.selectHiker(d.hiker_code)">
@@ -184,12 +210,36 @@ import GpxExportButton from "./GpxExportButton.vue";
 import RssiScatter from "./RssiScatter.vue";
 import { useUiStore } from "../stores/ui";
 import { alertLabel } from "../utils/alerts";
+import { useLatencyProbeStore } from "../stores/latencyProbe";
 
 const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
 const sessionStore = useSessionStore();
 const diagStore = useDiagnosticsStore();
 const uiStore = useUiStore();
+const latencyProbe = useLatencyProbeStore();
+
+// ── Kesehatan jalur data di sisi laptop ──
+const showClockWarn = computed(() => ["jam_laptop_tertinggal", "curiga_jam_maju"].includes(diagStore.clock?.status));
+const showSerial = computed(() => diagStore.serialTiming && diagStore.serialTiming.verdict !== "belum_cukup_data");
+const SERIAL_BADGE = {
+  tidak_ada_penumpukan: { cls: "ok", label: "Normal" },
+  host_tertinggal: { cls: "warn", label: "Laptop lambat" },
+  tertahan_sebelum_dibaca: { cls: "warn", label: "Tertahan sebelum dibaca" },
+};
+const serialBadge = computed(() => SERIAL_BADGE[diagStore.serialTiming?.verdict] || { cls: "neutral", label: "—" });
+const probe = computed(() => latencyProbe.summary);
+const probeReady = computed(() => (probe.value.db_to_render_s?.n ?? 0) >= 5);
+const fmtMs = (s) => (s == null ? "—" : `${Math.round(s * 1000)} ms`);
+const fmtSec = (s) => (s == null ? "—" : `${s.toFixed(s < 10 ? 2 : 1)} dtk`);
+function downloadProbeCsv() {
+  const url = URL.createObjectURL(new Blob([latencyProbe.csv()], { type: "text/csv" }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `latensi-layar-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 const collapsed = ref(false);
 
 // Tampilan harian cukup daftar pendaki + SOS. Diagnostik link & log paket muncul di mode lanjutan.

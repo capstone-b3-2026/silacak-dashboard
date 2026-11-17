@@ -157,6 +157,11 @@ export async function saveRelayPositions(relays) {
 }
 
 // ── Diagnostik link ──
+// Analisis penumpukan paket antara penerimaan radio di base dan pembacaan serial (backend/app/services/serial_timing.py).
+export async function fetchSerialTiming() {
+  return jsonOrThrow(await fetch(`${BASE_URL}/diagnostics/serial-timing`));
+}
+
 export async function fetchDiagnostics() {
   return jsonOrThrow(await fetch(`${BASE_URL}/diagnostics`));
 }
@@ -201,4 +206,9 @@ export async function openDataFolder() {
 // ── Baterai relay (baris CSV_RELAY_BATTERY dari base, dibaca backend ingest tertanam) ──
 export async function fetchRelayStatus() {
   return jsonOrThrow(await fetch(`${BASE_URL}/relays/status`));
+}
+
+// ── Pengaturan operator (ambang deteksi) ──
+export async function fetchAppConfig() {
+  return jsonOrThrow(await fetch(`${BASE_URL}/app-config`));
 }

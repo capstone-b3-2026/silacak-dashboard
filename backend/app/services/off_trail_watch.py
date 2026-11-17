@@ -7,7 +7,7 @@ Sinyal ini TAMBAHAN, bukan pengganti Auto-SOS (stagnant). Keduanya memakai perim
 
 Dipicu dari NOTIFY `position_updates` (main.py) untuk SETIAP baris positions yang masuk - sama jalur
 dengan sos_watch - supaya peringatan muncul dalam satu-dua paket (bukan menunggu scheduler 2 menit).
-Debounce `DEBOUNCE_N` paket (lihat geo.is_off_trail) menapis lonjakan GPS satu paket.
+Debounce `settings.offtrail_debounce_packets` paket (lihat geo.is_off_trail) menapis lonjakan GPS satu paket.
 """
 from __future__ import annotations
 
@@ -22,24 +22,23 @@ from app.services.notifier import notifier
 
 log = logging.getLogger("silacak.offtrail")
 
-DEBOUNCE_N = 3  # paket terbaru yang harus semuanya di luar perimeter (ASUMSI, belum dikalibrasi)
-
-
 async def handle_position(data: dict) -> None:
     code = data.get("hiker_code")
     session_id = data.get("session_id")
     if database.pool is None or session_id is None or not code:
         return
+    # Dibaca TIAP paket (bukan konstanta modul) supaya perubahan dari halaman pengaturan langsung berlaku.
+    debounce_n = max(1, int(settings.offtrail_debounce_packets))
     async with database.pool.acquire() as conn:
         trail = await position_repo.get_active_site_trail(conn)
         if not trail or len(trail) < 2:
             return  # tanpa acuan koridor jangan menebak (sama seperti stagnant)
         trail_pts = [(p[0], p[1]) for p in trail]
 
-        rows = await position_repo.get_recent_fixes_for_session(conn, session_id, DEBOUNCE_N)
+        rows = await position_repo.get_recent_fixes_for_session(conn, session_id, debounce_n)
         recent_points = [(r["lat"], r["lon"]) for r in rows]  # terbaru -> terlama
 
-        off = geo.is_off_trail(recent_points, trail_pts, settings.stagnant_perimeter_m, DEBOUNCE_N)
+        off = geo.is_off_trail(recent_points, trail_pts, settings.stagnant_perimeter_m, debounce_n)
 
         if off:
             if await alert_repo.get_active_alert(conn, session_id, "OFF_TRAIL"):

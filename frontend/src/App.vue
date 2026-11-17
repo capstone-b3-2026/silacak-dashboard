@@ -9,6 +9,9 @@
         <div class="brand-t"><strong>SiLacak</strong><span>Pemantauan pendakian</span></div>
       </div>
       <div class="top-right">
+        <button class="tb-ic" type="button" @click="uiStore.openSettings()" title="Pengaturan: ambang alarm, lebar koridor, base station" aria-label="Buka pengaturan">
+          <svg viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9" /><circle cx="15" cy="7" r="2" /><circle cx="9" cy="17" r="2" /></svg>
+        </button>
         <button class="tb-ic" type="button" @click="toggleTheme" title="Ganti tema terang/gelap" aria-label="Ganti tema terang atau gelap">
           <svg v-if="theme === 'dark'" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></svg>
           <svg v-else viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" /></svg>
@@ -28,6 +31,8 @@
     <MonitoringPanel />
     <!-- Setup lokasi / DEM / relay = pengaturan lanjutan (persiapan lokasi), tidak dibutuhkan operator harian -->
     <SetupPanel v-if="siteStore.showSetup && uiStore.advanced" />
+    <!-- Pengaturan ambang deteksi: halaman /pengaturan yang sama, tampil di dalam dashboard (tanpa browser/address bar) -->
+    <SettingsModal :theme="theme" />
   </div>
 </template>
 
@@ -38,15 +43,18 @@ import MapView from "./components/MapView.vue";
 import MonitoringPanel from "./components/MonitoringPanel.vue";
 import SosOverlay from "./components/SosOverlay.vue";
 import SetupPanel from "./components/SetupPanel.vue";
+import SettingsModal from "./components/SettingsModal.vue";
 import BaseStatusBar from "./components/BaseStatusBar.vue";
 import { useBaseStore } from "./stores/base";
 import { useUiStore } from "./stores/ui";
+import { useAppConfigStore } from "./stores/appConfig";
 import { installAutoUnlock } from "./composables/useAlarmSound";
 import { useSiteStore } from "./stores/site";
 import { useHikerStore } from "./stores/hikers";
 import { useAlertStore } from "./stores/alerts";
 import { useSessionStore } from "./stores/sessions";
 import { useDiagnosticsStore } from "./stores/diagnostics";
+import { useLatencyProbeStore } from "./stores/latencyProbe";
 import { useLiveStream } from "./composables/useLiveStream";
 
 const theme = ref("dark");
@@ -67,9 +75,13 @@ const sessionStore = useSessionStore();
 const diagStore = useDiagnosticsStore();
 const baseStore = useBaseStore();
 const uiStore = useUiStore();
+const appConfigStore = useAppConfigStore();
 let diagTimer = null;
+// Pengaturan bisa saja diubah dari jendela lain (/pengaturan di browser): muat ulang saat jendela dashboard kembali fokus.
+const reloadAppConfig = () => appConfigStore.load();
 watch(() => hikerStore.selectedCode, (c) => diagStore.refresh(c));
 onUnmounted(() => {
+  window.removeEventListener("focus", reloadAppConfig);
   clearInterval(diagTimer);
   baseStore.stop();
 });
@@ -78,6 +90,8 @@ onMounted(() => {
   hikerStore.loadInitial();
   alertStore.loadInitial();
   siteStore.loadActive();
+  appConfigStore.load(); // lebar koridor di peta mengikuti pengaturan operator
+  window.addEventListener("focus", reloadAppConfig);
   sessionStore.loadActive();
   baseStore.start();
   installAutoUnlock();
@@ -86,9 +100,11 @@ onMounted(() => {
 });
 
 let lastSessionSync = 0;
-useLiveStream((message) => {
+const latencyProbe = useLatencyProbeStore();
+useLiveStream((message, tSse) => {
   if (message.type === "position") {
     hikerStore.applyPositionUpdate(message.data);
+    latencyProbe.sampleAfterRender(message.data, tSse); // ukur SSE tiba -> tergambar di layar
     // Alat baru yang mulai mengirim data dibuatkan sesi OTOMATIS oleh database (tanpa event SSE).
     // Muat ulang daftar sesi sekali (maks. tiap 5 dtk) supaya banner "Belum check-in" langsung muncul tanpa refresh.
     if (!sessionStore.active.some((s) => s.hiker_code === message.data.hiker_code) && Date.now() - lastSessionSync > 5000) {

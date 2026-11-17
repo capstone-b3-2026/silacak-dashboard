@@ -22,20 +22,47 @@ log = logging.getLogger("silacak.settings")
 
 FIELDS: list[dict[str, Any]] = [
     {
-        "key": "stagnant_window_minutes", "type": "int", "min": 10, "max": 1440, "unit": "menit",
-        "label": "Pendaki dianggap diam terlalu lama setelah",
-        "help": "Kalau pendaki nyaris tidak berpindah selama waktu ini, sistem membunyikan alarm 'diam terlalu lama'. "
-                "Nilai ini belum dikalibrasi dengan data lapangan.",
-    },
-    {
-        "key": "stagnant_radius_m", "type": "float", "min": 5, "max": 500, "unit": "meter",
+        "key": "stagnant_radius_m", "type": "float", "min": 5, "max": 500, "step": 1, "unit": "meter",
         "label": "Dianggap diam jika bergeser kurang dari",
         "help": "GPS di bawah pohon bisa meleset 10 sampai 30 meter, jadi jangan diisi terlalu kecil.",
+    },
+    {
+        "key": "stagnant_perimeter_m", "type": "float", "min": 1, "max": 500, "step": 1, "unit": "meter",
+        "label": "Lebar koridor di sekitar jalur",
+        "help": "Jarak dari garis jalur yang masih dianggap 'di jalur'. Dipakai bersama oleh alarm 'di luar jalur' "
+                "dan pemilihan jendela diam di bawah. Garis putus-putus koridor di peta ikut berubah. "
+                "GPS bisa meleset 5 sampai 30 meter, jadi nilai kecil (di bawah 10) membuat alarm sering salah; "
+                "wajar dipakai hanya untuk uji coba di area sempit. Belum dikalibrasi dengan data lapangan.",
+    },
+    {
+        "key": "stagnant_window_inside_minutes", "type": "int", "min": 10, "max": 1440, "unit": "menit",
+        "label": "Diam terlalu lama jika masih di dalam koridor setelah",
+        "help": "Pendaki yang diam di dalam koridor dianggap wajar (istirahat atau tidur), jadi toleransinya panjang. "
+                "Belum dikalibrasi dengan data lapangan.",
+    },
+    {
+        "key": "stagnant_window_outside_minutes", "type": "int", "min": 10, "max": 1440, "unit": "menit",
+        "label": "Diam terlalu lama jika di luar koridor setelah",
+        "help": "Diam di luar jalur lebih mencurigakan (mungkin kecelakaan), jadi toleransinya lebih pendek. "
+                "Belum dikalibrasi dengan data lapangan.",
     },
     {
         "key": "stagnant_check_interval_minutes", "type": "int", "min": 1, "max": 60, "unit": "menit",
         "label": "Sistem memeriksa pendaki diam setiap",
         "help": "Makin kecil makin cepat alarm muncul, tapi makin sering memeriksa.",
+    },
+    {
+        "key": "data_retention_days", "type": "int", "min": 0, "max": 3650, "step": 1, "unit": "hari",
+        "label": "Hapus data sesi yang sudah selesai setelah",
+        "help": "0 = simpan selamanya (bawaan). Bila diisi, titik posisi, alarm, dan catatan sesi yang sudah selesai lebih lama dari "
+                "angka ini DIHAPUS PERMANEN setiap dini hari. Sesi yang masih berjalan tidak pernah dihapus. Tentukan lamanya sesuai "
+                "kebijakan lembaga dan UU Pelindungan Data Pribadi; aplikasi tidak menentukan angka yang sah.",
+    },
+    {
+        "key": "offtrail_debounce_packets", "type": "int", "min": 1, "max": 20, "unit": "paket",
+        "label": "Alarm 'di luar jalur' menyala setelah berturut-turut",
+        "help": "Berapa paket posisi terbaru yang semuanya harus di luar koridor. Paket masuk kira-kira tiap 5 detik. "
+                "Makin besar makin kebal lonjakan GPS, tapi alarm makin lambat. Belum dikalibrasi dengan data lapangan.",
     },
 ]
 _BY_KEY = {f["key"]: f for f in FIELDS}
@@ -120,8 +147,10 @@ def put_state(settings: Any, data_dir: str, mode: str, values: dict[str, Any]) -
             setattr(settings, f["key"], default_of(cls, f["key"]))
     elif mode == "custom":
         overrides = validate(values)
-        for k, v in overrides.items():
-            setattr(settings, k, v)
+        # Kunci yang TIDAK dikirim kembali ke bawaan, supaya nilai di memori sama persis dengan yang
+        # tersimpan (dan yang akan dimuat setelah restart), bukan sisa dari pengaturan sebelumnya.
+        for f in FIELDS:
+            setattr(settings, f["key"], overrides.get(f["key"], default_of(cls, f["key"])))
     else:
         raise ValueError("mode harus 'default' atau 'custom'.")
     _save(data_dir, overrides)

@@ -2,6 +2,7 @@ from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from app.core.config import settings
+from app.services.retention import run_retention_job
 from app.services.stagnant_detector import check_stagnant_hikers
 
 scheduler = AsyncIOScheduler()
@@ -20,6 +21,9 @@ def start_scheduler() -> None:
         # pernah beneran jalan. 30 detik cukup longgar buat kasus ini.
         misfire_grace_time=30,
     )
+    # Retensi data: harian pukul 03:30 waktu laptop. Tidak menghapus apa pun selama data_retention_days = 0 (bawaan).
+    scheduler.add_job(run_retention_job, trigger="cron", hour=3, minute=30, id="retention", replace_existing=True,
+                      misfire_grace_time=3600, coalesce=True)
     scheduler.start()
 
 

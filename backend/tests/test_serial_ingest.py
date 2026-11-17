@@ -139,6 +139,33 @@ class Ingest(unittest.TestCase):
         self.assertEqual(len(self.inserts()), 5)
         self.assertEqual(sum("FROM devices" in e[1] for e in self.pool.log), 1)  # peran node dicari sekali
 
+    def test_serial_read_at_dicatat_dan_paket_ganda_tidak_dihitung_diterima(self):
+        from datetime import datetime, timezone
+        t = datetime(2026, 11, 16, 3, 0, 0, tzinfo=timezone.utc)
+        self.run_async(self.ing._handle_line(FIX, 123.0, t, 0))
+        (_, sql, a), = self.inserts()
+        self.assertEqual(a[19], t)                       # $20 serial_read_at = saat baris DIBACA, bukan saat insert
+        self.assertIn("ON CONFLICT DO NOTHING", sql)
+        self.assertEqual((self.ing.status()["packets_received"], self.ing.status()["packets_duplicate"]), (1, 0))
+        # DB menjawab "INSERT 0 0" (ditolak indeks unik) -> dihitung ganda, BUKAN diterima
+        orig = FakeConn.execute
+
+        async def dup(self_, sql, *args):
+            await orig(self_, sql, *args)
+            return "INSERT 0 0"
+        FakeConn.execute = dup
+        try:
+            self.run_async(self.ing._handle_line(FIX))
+        finally:
+            FakeConn.execute = orig
+        self.assertEqual((self.ing.status()["packets_received"], self.ing.status()["packets_duplicate"]), (1, 1))
+
+    def test_jam_base_masuk_pengukur_penumpukan(self):
+        self.run_async(self.ing._handle_line(FIX, 50.0, None, 0))
+        self.assertEqual(self.ing.timing_stats()["n"], 1)            # FIX membawa base_received_uptime_ms=45010
+        self.run_async(self.ing._handle_line(NOFIX, 55.0, None, None))
+        self.assertEqual(self.ing.timing_stats()["n"], 2)
+
     def test_baris_rusak_dihitung_ditolak(self):
         self.run_async(self.ing._handle_line("CSV_DATA,1,2"))
         self.assertEqual(self.ing.status()["packets_rejected"], 1)

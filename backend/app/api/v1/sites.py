@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 import os
 import shutil
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from datetime import datetime, timezone
 import gpxpy.gpx
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import Response
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from app.core import database
 from app.core.database import get_db
@@ -37,7 +38,7 @@ DEFAULT_PARAMS = {
     "calib_offset_db": 0.0,  # redaman tambahan hasil kalibrasi RSSI lapangan (+ = lebih lemah dari model)
     "veg_scale": 1.0,  # pengali redaman vegetasi (0 = abaikan; < 1 bila DEM sudah memuat kanopi)
 }
-_NONNEG = {"dem_error_m", "veg_scale", "fade_margin_db"}  # boleh 0
+_NONNEG = {"dem_error_m", "veg_scale", "fade_margin_db", "max_relays"}  # boleh 0 (max_relays=0: hanya base, tanpa relay)
 _ANY_SIGN = {"tx_dbm", "gain_hiker_dbi", "gain_relay_dbi", "sensitivity_dbm", "calib_offset_db"}  # boleh negatif/0
 
 
@@ -254,7 +255,9 @@ def _plan_blocking(dem_path: str, base: dict, trail: list, params: dict) -> dict
     message = None
     if not result.complete:
         k = result.stalled_at
-        if result.stall_reason == "max_relays":
+        if result.stall_reason == "max_relays" and int(params["max_relays"]) == 0:
+            why = "batas relay diset 0, jadi hanya base yang dihitung; tambah relay (manual atau naikkan batas) untuk memperluas"
+        elif result.stall_reason == "max_relays":
             why = f"batas {int(params['max_relays'])} relay tercapai sebelum trail habis"
         else:
             why = ("tidak ada posisi relay (dalam radius cari dan lereng yang bisa dipasangi) yang tersambung "
@@ -324,22 +327,34 @@ def _evaluate_blocking(dem_path: str, base: dict, trail: list, params: dict, rel
     }
 
 
+MAX_MANUAL_RELAYS = 50
+
+
 class RelayMove(BaseModel):
-    relays: list[list[float]]  # [[lat, lon], ...] urut sama dengan R1, R2, ...
+    # [[lat, lon], ...] urut R1, R2, ... Jumlahnya bebas (0 = tanpa relay): operator boleh menambah/menghapus relay
+    # sendiri tanpa menunggu saran perencana. Relay hanya bisa tersambung ke base/relay dengan nomor LEBIH KECIL.
+    relays: list[list[float]]
+
+    @field_validator("relays")
+    @classmethod
+    def _valid(cls, v):
+        if len(v) > MAX_MANUAL_RELAYS:
+            raise ValueError(f"Maksimal {MAX_MANUAL_RELAYS} relay.")
+        for p in v:
+            if len(p) != 2 or not all(math.isfinite(x) for x in p) or abs(p[0]) > 90 or abs(p[1]) > 180:
+                raise ValueError("Tiap relay harus [lat, lon] yang valid.")
+        return v
 
 
 @router.put("/active/relays")
 async def move_relays(body: RelayMove, conn=Depends(get_db)):
-    """Simpan posisi relay yang digeser manual (Setup aktif), lalu nilai ulang tiap link dari DEM."""
+    """Simpan posisi relay buatan operator (geser/tambah/hapus; 0..50 relay, tanpa perlu saran perencana dulu), lalu nilai ulang tiap link dari DEM."""
     r = await _active(conn)
     if not r or r["status"] != "ready":
         raise HTTPException(409, "DEM belum siap.")
     base, trail = _j(r["base"]), _j(r["trail"])
     if not base or not trail:
         raise HTTPException(400, "Isi titik base dan trail dulu.")
-    old = _j(r["plan"])
-    if not old or len(old.get("relays", [])) != len(body.relays):
-        raise HTTPException(409, "Jumlah relay berubah. Hitung ulang dulu.")
     params = _merge_params(r["params"])
     try:
         plan = await asyncio.to_thread(

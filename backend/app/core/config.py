@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     # Parameter Auto-SOS, sengaja dibuat configurable (bukan hardcode)
     # karena radius & window perlu dikalibrasi ulang pakai data GPS
     # asli di lapangan (akurasi GPS di bawah kanopi bisa drift 10-30m).
+    # DEPRECATED, TIDAK DIPAKAI detektor sejak logika koridor (lihat stagnant_window_inside/outside_minutes
+    # di bawah). Dipertahankan hanya supaya berkas .env lama yang masih memuatnya tidak ditolak pydantic.
     stagnant_window_minutes: int = 180
     stagnant_radius_m: float = 50.0
     stagnant_check_interval_minutes: int = 2
@@ -21,6 +23,15 @@ class Settings(BaseSettings):
     stagnant_perimeter_m: float = 50.0
     stagnant_window_inside_minutes: int = 480
     stagnant_window_outside_minutes: int = 240
+
+    # Peringatan dini "di luar jalur" (off_trail_watch): berapa paket berfix TERBARU yang semuanya harus
+    # di luar koridor sebelum alarm menyala (menapis lonjakan GPS satu paket). Paket ~5 dtk sekali ->
+    # 3 paket ~15 dtk. ASUMSI BELUM DIKALIBRASI.
+    offtrail_debounce_packets: int = 3
+
+    # Masa simpan data sesi pendakian yang SUDAH SELESAI (hari). 0 = simpan selamanya (bawaan; tidak ada yang dihapus).
+    # Lihat app/services/retention.py untuk daftar yang dihapus dan yang tidak.
+    data_retention_days: int = 0
 
     # Folder data (DEM/tile hasil Setup, log mentah serial). Sama dengan env DATA_DIR yang dibaca sites.py.
     data_dir: str = "/app/data"

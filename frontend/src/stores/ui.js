@@ -13,7 +13,7 @@ function read() {
 }
 
 export const useUiStore = defineStore("ui", {
-  state: () => ({ advanced: read() }),
+  state: () => ({ advanced: read(), showSettings: false }), // showSettings: jendela Pengaturan ambang (tidak disimpan)
   actions: {
     setAdvanced(v) {
       this.advanced = !!v;
@@ -22,6 +22,12 @@ export const useUiStore = defineStore("ui", {
       } catch (e) {
         /* mode tetap berlaku selama halaman terbuka */
       }
+    },
+    openSettings() {
+      this.showSettings = true;
+    },
+    closeSettings() {
+      this.showSettings = false;
     },
     toggleAdvanced() {
       this.setAdvanced(!this.advanced);

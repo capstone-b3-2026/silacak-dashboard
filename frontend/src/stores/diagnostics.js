@@ -1,10 +1,10 @@
 import { defineStore } from "pinia";
-import { fetchDiagnostics, fetchPackets } from "../services/api";
+import { fetchDiagnostics, fetchPackets, fetchSerialTiming } from "../services/api";
 
 // Diagnostik link per sesi aktif (PDR, latency, node basi, jarak ke base) + packet log pendaki terpilih.
 // Polling ringan: dashboard lokal, dan indikator "basi" memang perlu dihitung ulang berkala.
 export const useDiagnosticsStore = defineStore("diagnostics", {
-  state: () => ({ sessions: {}, staleAfterS: 120, baseSet: false, packets: [], packetsFor: null, trend: [], trendFor: null }),
+  state: () => ({ sessions: {}, staleAfterS: 120, baseSet: false, packets: [], packetsFor: null, trend: [], trendFor: null, clock: null, serialTiming: null }),
   getters: {
     list: (s) => Object.values(s.sessions).sort((a, b) => a.hiker_code.localeCompare(b.hiker_code)),
     // PDR gabungan semua sesi aktif: total diterima / (diterima + hilang), paket pertama tiap sesi = jangkar.
@@ -24,7 +24,13 @@ export const useDiagnosticsStore = defineStore("diagnostics", {
         const d = await fetchDiagnostics();
         this.staleAfterS = d.stale_after_s;
         this.baseSet = d.base_set;
+        this.clock = d.clock_check ?? null; // kesinkronan jam laptop vs jam GPS (backend/app/services/clock_check.py)
         this.sessions = Object.fromEntries(d.sessions.map((x) => [x.hiker_code, x]));
+        try {
+          this.serialTiming = await fetchSerialTiming(); // penumpukan base -> baca serial (opsional; gagal tidak mengganggu yang lain)
+        } catch (e) {
+          this.serialTiming = null;
+        }
         if (selectedCode) {
           this.packets = await fetchPackets(selectedCode);
           this.packetsFor = selectedCode;

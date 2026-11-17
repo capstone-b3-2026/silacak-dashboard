@@ -76,76 +76,110 @@
         <section class="pnl">
           <div class="ph"><span class="tl">2 · Titik base &amp; trail</span></div>
           <div class="pb">
-            <div class="row">
-              <div class="grow">
-                <span class="lbl">Base station</span>
-                <b v-if="site.site.base">{{ site.site.base.lat.toFixed(5) }}, {{ site.site.base.lon.toFixed(5) }}</b>
-                <b v-else class="muted">belum diisi</b>
-              </div>
-              <button class="btn" :class="{ active: site.editMode === 'base' }" @click="toggleEdit('base')">
-                {{ site.editMode === "base" ? "Klik peta…" : "Pilih di peta" }}
-              </button>
-            </div>
-            <div class="row">
-              <div class="grow">
-                <span class="lbl">Jalur pendakian</span>
-                <b>{{ site.site.trail.length }} titik</b>
-              </div>
-              <button class="btn" :class="{ active: site.editMode === 'trail' }" @click="toggleEdit('trail')">
-                {{ site.editMode === "trail" ? "Selesai" : "Gambar di peta" }}
-              </button>
-            </div>
-            <div class="dist" v-if="trailDist.segments.length">
-              <div class="dist-head">
-                <span class="lbl">Jarak horizontal</span>
-                <b>{{ (trailDist.totalM / 1000).toFixed(2) }} km</b>
-                <button class="lnk" type="button" @click="showSegments = !showSegments">
-                  {{ showSegments ? "sembunyikan rincian" : "rincian segmen" }}
+
+            <!-- Subcard: base station -->
+            <div class="sub">
+              <div class="row">
+                <div class="grow">
+                  <span class="lbl">Base station</span>
+                  <b v-if="site.site.base">{{ site.site.base.lat.toFixed(5) }}, {{ site.site.base.lon.toFixed(5) }}</b>
+                  <b v-else class="muted">belum diisi</b>
+                </div>
+                <button class="btn" :class="{ active: site.editMode === 'base' }" @click="toggleEdit('base')">
+                  {{ site.editMode === "base" ? "Klik peta…" : "Pilih di peta" }}
                 </button>
               </div>
-              <!-- Angka 3D sekunder (profil dari DEM). Sembunyi bila DEM belum siap / belum terhitung;
-                   angka horizontal di atas tetap tampil. -->
-              <div class="dist-sub" v-if="site.trail3d">
-                <span class="lbl">profil (dari DEM)</span>
-                <b v-if="trail3dText">{{ trail3dText }}</b>
-                <span class="note" v-if="site.trail3d.incomplete">sebagian jalur di luar cakupan DEM</span>
+              <p v-if="site.editMode === 'base'" class="hint hot">Klik satu titik di peta untuk menaruh base.</p>
+            </div>
+
+            <!-- Subcard: jalur pendakian -->
+            <div class="sub">
+              <div class="row">
+                <div class="grow">
+                  <span class="lbl">Jalur pendakian</span>
+                  <b>{{ site.site.trail.length }} titik</b>
+                </div>
+                <button class="btn" :class="{ active: site.editMode === 'trail' }" @click="toggleEdit('trail')">
+                  {{ site.editMode === "trail" ? "Selesai" : "Gambar di peta" }}
+                </button>
               </div>
-              <ul v-if="showSegments" class="seg">
-                <li v-for="(s, i) in trailDist.segments" :key="i">
-                  <span>{{ s.fromLabel }} &rarr; {{ s.toLabel }}</span>
-                  <span>{{ fmtDist(s.m) }}</span>
-                </li>
-              </ul>
-            </div>
-            <!-- Ringkasan relay: SELALU tampil. Tombol "Hitung relay" dinonaktifkan secara visual
-                 bila trail belum cukup; klik paksa memunculkan notice. Relay tetap keluaran planner
-                 (runPlan) - tidak ada penempatan manual di sini. -->
-            <div class="row">
-              <div class="grow">
-                <span class="lbl">Relay</span>
-                <b v-if="relayCoverage.hasPlan">
-                  <span class="chip" :class="relayCoverage.statusClass">{{ relayCoverage.text }}</span>
-                  <span class="relay-count">· {{ relayCoverage.relays }} relay</span>
-                </b>
-                <b v-else class="muted">belum dihitung</b>
+              <div class="row" v-if="site.site.trail.length">
+                <button class="btn sm" @click="site.undoTrail()">Undo titik</button>
+                <button class="btn sm danger" @click="site.clearTrail()">Hapus trail</button>
               </div>
-              <button
-                v-if="!relayCoverage.hasPlan"
-                class="btn sm"
-                :class="{ 'is-off': !relayCoverage.canPlan }"
-                :disabled="site.busy"
-                @click="tryRunPlan()"
-              >
-                {{ site.busy ? "Menghitung…" : "Hitung relay" }}
-              </button>
+              <div class="dist" v-if="trailDist.segments.length">
+                <div class="dist-head">
+                  <span class="lbl">Jarak horizontal</span>
+                  <b>{{ (trailDist.totalM / 1000).toFixed(2) }} km</b>
+                  <button class="lnk" type="button" @click="showSegments = !showSegments">
+                    {{ showSegments ? "sembunyikan rincian" : "rincian segmen" }}
+                  </button>
+                </div>
+                <div class="dist-sub" v-if="site.trail3d">
+                  <span class="lbl">profil (dari DEM)</span>
+                  <b v-if="trail3dText">{{ trail3dText }}</b>
+                  <span class="note" v-if="site.trail3d.incomplete">sebagian jalur di luar cakupan DEM</span>
+                </div>
+                <ul v-if="showSegments" class="seg">
+                  <li v-for="(s, i) in trailDist.segments" :key="i">
+                    <span>{{ s.fromLabel }} &rarr; {{ s.toLabel }}</span>
+                    <span>{{ fmtDist(s.m) }}</span>
+                  </li>
+                </ul>
+              </div>
+              <p v-if="site.editMode === 'trail'" class="hint hot">Klik di peta berurutan dari base ke arah puncak.</p>
             </div>
-            <div class="row" v-if="site.site.trail.length">
-              <button class="btn sm" @click="site.undoTrail()">Undo titik</button>
-              <button class="btn sm danger" @click="site.clearTrail()">Hapus trail</button>
+
+            <!-- Subcard: relay -->
+            <div class="sub">
+              <div class="row">
+                <div class="grow">
+                  <span class="lbl">Relay</span>
+                  <b v-if="relayCoverage.hasPlan">
+                    <span class="chip" :class="relayCoverage.statusClass">{{ relayCoverage.text }}</span>
+                    <span class="relay-count">· {{ relayCoverage.relays }} relay</span>
+                  </b>
+                  <b v-else class="muted">belum dihitung</b>
+                </div>
+                <button
+                  v-if="!relayCoverage.hasPlan"
+                  class="btn sm"
+                  :class="{ 'is-off': !relayCoverage.canPlan }"
+                  :disabled="site.busy"
+                  @click="tryRunPlan()"
+                >
+                  {{ site.busy ? "Menghitung…" : "Hitung relay" }}
+                </button>
+              </div>
+              <div class="relay-edit" v-if="site.ready && (relayCoverage.hasPlan || relayCoverage.canPlan)">
+                <div class="row wrap">
+                  <button class="btn sm" :class="{ active: site.editMode === 'relay' }" :disabled="site.busy" @click="toggleEdit('relay')">
+                    {{ site.editMode === "relay" ? "Selesai menaruh" : "+ Taruh relay di peta" }}
+                  </button>
+                  <button v-if="relayCoverage.hasPlan && relayCoverage.relays > 0" class="btn sm danger" :disabled="site.busy" @click="site.clearRelays()">Tanpa relay</button>
+                  <button
+                    v-if="relayCoverage.hasPlan"
+                    class="btn sm"
+                    :disabled="site.busy || !site.site.base || site.site.trail.length < 1"
+                    @click="site.runPlan()"
+                    title="Buang susunan sekarang dan minta saran perencana"
+                  >
+                    {{ site.busy ? "Menghitung…" : "Saran perencana" }}
+                  </button>
+                </div>
+                <ul v-if="relayCoverage.hasPlan && relayCoverage.relays > 0" class="relay-list">
+                  <li v-for="r in site.site.plan.relays" :key="r.n" :class="{ broken: r.link_ok === false }">
+                    <span>R{{ r.n }} · hop {{ r.hop_km }} km<template v-if="r.link_ok === false"> · link putus</template></span>
+                    <button class="lnk danger" type="button" :disabled="site.busy" @click="removeRelay(r.n)" :aria-label="`Hapus relay ${r.n}`">hapus</button>
+                  </li>
+                </ul>
+                <p v-else-if="relayCoverage.hasPlan" class="hint">Tanpa relay: hanya jangkauan langsung dari base yang dihitung.</p>
+              </div>
+              <p v-if="site.editMode === 'relay'" class="hint hot">
+                Klik peta untuk menaruh relay (jadi R{{ (site.site.plan?.relays?.length || 0) + 1 }}). Klik "Selesai menaruh" bila sudah.
+              </p>
             </div>
-            <p v-if="site.editMode" class="hint hot">
-              {{ site.editMode === "base" ? "Klik satu titik di peta untuk menaruh base." : "Klik di peta berurutan dari base ke arah puncak." }}
-            </p>
+
           </div>
         </section>
 
@@ -260,6 +294,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { useSiteStore } from "../stores/site";
 import { useDeviceStore } from "../stores/devices";
+import { slotShiftAfterRemoval } from "../utils/relayEdit";
 import { useBaseStore } from "../stores/base";
 import { trailSegments } from "../utils/routeGeo";
 import ParamTip from "./ParamTip.vue";
@@ -350,6 +385,11 @@ async function doUpload() {
   siteName.value = "";
   if (fileInput.value) fileInput.value.value = "";
 }
+// Hapus relay Rn lalu geser slot alat relay di atasnya supaya tiap alat tetap menunjuk relay yang sama.
+async function removeRelay(n) {
+  if (!(await site.removeRelay(n))) return;
+  for (const [id, slot] of slotShiftAfterRemoval(dev.devices, n)) await dev.setSlot(id, slot);
+}
 function toggleEdit(mode) {
   site.editMode = site.editMode === mode ? null : mode;
 }
@@ -413,7 +453,7 @@ onBeforeUnmount(() => dev.stop());
 .dot { position: absolute; top: 8px; right: 10px; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
 
 .pb { padding: 12px 14px 14px; display: flex; flex-direction: column; gap: 10px; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.sub { display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: 10px; }
 .grid2 .wide, .wide { grid-column: 1 / -1; }
 .row { display: flex; align-items: center; gap: 8px; }
 .grow { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -441,6 +481,12 @@ label { display: flex; flex-direction: column; gap: 5px; }
 .chip.ready { color: var(--green); border-color: var(--green); }
 .chip.processing, .chip.warn { color: var(--text-2); border-color: var(--text-2); }
 .chip.error { color: var(--red); border-color: var(--red); }
+.relay-edit { display: flex; flex-direction: column; gap: 8px; }
+.row.wrap { flex-wrap: wrap; }
+.relay-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--text-2); }
+.relay-list li { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.relay-list li.broken { color: var(--red); }
+.lnk.danger { color: var(--red); }
 .relay-count { font-size: 14px; font-weight: 600; color: var(--text-2); margin-left: 6px; }
 
 .drop { border: 1.5px dashed var(--line-3); border-radius: 12px; padding: 18px 12px; display: flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; text-align: center; transition: background 0.12s, border-color 0.12s; color: var(--text); }

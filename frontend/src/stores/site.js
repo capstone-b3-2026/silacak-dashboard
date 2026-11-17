@@ -3,12 +3,13 @@ import {
   fetchActiveSite, uploadDem, saveSiteInputs, computeRelayPlan, dismissFailedUpload, saveRelayPositions,
   uploadCanopy, deleteCanopy, fetchCalibration, fetchTrailDistance3d,
 } from "../services/api";
+import { withAdded, withMoved, withRemoved } from "../utils/relayEdit";
 
 export const useSiteStore = defineStore("site", {
   state: () => ({
     site: null, // lokasi aktif dari backend (DEM + base + trail + hasil relay)
     showSetup: false,
-    editMode: null, // null | "base" | "trail" -> klik peta buat nambah titik
+    editMode: null, // null | "base" | "trail" | "relay" -> klik peta buat nambah titik / relay
     busy: false, // upload / hitung lagi jalan
     calibration: null, // hasil GET /sites/active/calibration (saran offset & margin fading)
     calibrating: false,
@@ -124,6 +125,9 @@ export const useSiteStore = defineStore("site", {
         this.editMode = null;
       } else if (this.editMode === "trail") {
         this.site.trail = [...this.site.trail, [r(lat), r(lon)]];
+      } else if (this.editMode === "relay") {
+        // Mode tetap menyala supaya operator bisa menaruh beberapa relay berturut-turut; matikan lewat tombolnya.
+        return this.addRelay(lat, lon);
       }
       await this.saveInputs();
     },
@@ -165,23 +169,60 @@ export const useSiteStore = defineStore("site", {
         }
       }, 800);
     },
-    // Relay digeser di peta (Setup aktif). Posisi baru disimpan & tiap link dinilai ulang dari DEM.
-    async moveRelay(n, lat, lon) {
-      const snapBack = () => { this.site = { ...this.site }; }; // paksa peta menggambar ulang posisi sah terakhir
-      if (!this.inBounds(lat, lon)) {
-        this.error = "Relay di luar cakupan DEM.";
-        return snapBack();
-      }
-      const r = (v) => Math.round(v * 1e6) / 1e6;
-      const relays = (this.site.plan?.relays || []).map((x) => (x.n === n ? [r(lat), r(lon)] : [x.lat, x.lon]));
+    // Penyuntingan relay oleh operator: geser, tambah, hapus, atau kosongkan, TANPA menunggu saran perencana.
+    // Daftar baru disimpan lalu tiap link dinilai ulang dari DEM (plan hasilnya bertanda manual).
+    async _saveRelays(list) {
       try {
         this.error = null;
-        const plan = await saveRelayPositions(relays);
+        const plan = await saveRelayPositions(list);
         this.site = { ...this.site, plan };
+        return true;
       } catch (e) {
         this.error = e.message;
-        snapBack();
+        this.site = { ...this.site }; // paksa peta menggambar ulang posisi sah terakhir
+        return false;
       }
+    },
+    _relayEditReady() {
+      if (!this.site?.base || !(this.site?.trail?.length >= 1)) {
+        this.error = "Isi titik base dan jalur dulu sebelum menaruh relay.";
+        return false;
+      }
+      if (this.site.status !== "ready") {
+        this.error = "DEM belum siap.";
+        return false;
+      }
+      return true;
+    },
+    // Relay digeser di peta (Setup aktif). Posisi baru disimpan & tiap link dinilai ulang dari DEM.
+    async moveRelay(n, lat, lon) {
+      if (!this.inBounds(lat, lon)) {
+        this.error = "Relay di luar cakupan DEM.";
+        this.site = { ...this.site };
+        return;
+      }
+      await this._saveRelays(withMoved(this.site.plan, n, lat, lon));
+    },
+    async addRelay(lat, lon) {
+      if (!this._relayEditReady()) return;
+      if (!this.inBounds(lat, lon)) {
+        this.error = "Relay di luar cakupan DEM.";
+        return;
+      }
+      try {
+        await this._saveRelays(withAdded(this.site.plan, lat, lon));
+      } catch (e) {
+        this.error = e.message; // batas jumlah relay
+      }
+    },
+    async removeRelay(n) {
+      if (!this._relayEditReady()) return false;
+      return this._saveRelays(withRemoved(this.site.plan, n)); // true bila tersimpan
+    },
+    // "Tanpa relay": hanya base yang dihitung (cakupan = apa yang terjangkau langsung dari base).
+    async clearRelays() {
+      if (!this._relayEditReady()) return;
+      await this._saveRelays([]);
     },
     async undoTrail() {
       this.site.trail = this.site.trail.slice(0, -1);

@@ -11,6 +11,7 @@ except ImportError:
     sys.modules["asyncpg"] = types.SimpleNamespace(Pool=object, Connection=object, create_pool=None, connect=None)
 
 from app.core import database  # noqa: E402
+from app.core.config import settings  # noqa: E402
 from app.services import off_trail_watch as ow  # noqa: E402
 
 # Trail acuan = segmen vertikal (bujur 110.40). Titik di dalam koridor punya bujur ~110.40;
@@ -64,6 +65,7 @@ class OffTrailWatch(unittest.TestCase):
             ow.notifier.broadcast,
         )
         database.pool = FakePool(self.st)
+        self._orig_cfg = (settings.stagnant_perimeter_m, settings.offtrail_debounce_packets)
         st = self.st
 
         async def get_active(conn, session_id, alert_type):
@@ -96,6 +98,8 @@ class OffTrailWatch(unittest.TestCase):
          ow.notifier.broadcast) = (get_active, create, resolve, get_trail, get_fixes, bcast)
 
     def tearDown(self):
+        settings.stagnant_perimeter_m = self._orig_cfg[0]
+        settings.offtrail_debounce_packets = self._orig_cfg[1]
         (database.pool,
          ow.alert_repo.get_active_alert, ow.alert_repo.create_alert, ow.alert_repo.resolve_off_trail,
          ow.position_repo.get_active_site_trail, ow.position_repo.get_recent_fixes_for_session,
@@ -114,6 +118,32 @@ class OffTrailWatch(unittest.TestCase):
         self.run_(pos())
         self.assertEqual(self.st["created"], 1)
         self.assertEqual(self.types_broadcast(), ["alert"])
+
+    # ── ambang dibaca dari settings TIAP paket (bukan konstanta): perubahan dari halaman pengaturan langsung berlaku ──
+    def test_debounce_dari_settings_dinaikkan_butuh_lebih_banyak_fix(self):
+        settings.offtrail_debounce_packets = 5
+        self.st["fixes"] = [OUT, OUT, OUT]  # baru 3 fix di luar, butuh 5
+        self.run_(pos())
+        self.assertEqual(self.st["created"], 0)
+        self.st["fixes"] = [OUT] * 5
+        self.run_(pos())
+        self.assertEqual(self.st["created"], 1)
+
+    def test_debounce_1_langsung_alarm_dari_satu_fix(self):
+        settings.offtrail_debounce_packets = 1
+        self.st["fixes"] = [OUT]
+        self.run_(pos())
+        self.assertEqual(self.st["created"], 1)
+
+    def test_lebar_koridor_dari_settings_dipakai(self):
+        # OUT ~110 m dari jalur: di luar koridor 50 m, tetapi di dalam koridor 200 m
+        settings.stagnant_perimeter_m = 200.0
+        self.run_(pos())
+        self.assertEqual(self.st["created"], 0)
+        settings.stagnant_perimeter_m = 50.0
+        self.run_(pos())
+        self.assertEqual(self.st["created"], 1)
+        self.assertEqual(self.st["broadcasts"][0]["data"]["meta"]["perimeter_m"], 50.0)
 
     def test_sudah_ada_alarm_aktif_tidak_dobel(self):
         self.st["active"] = True
