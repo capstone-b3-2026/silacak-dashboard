@@ -136,7 +136,7 @@
   .num { flex:none; display:flex; align-items:center; gap:2px; padding-right:14px; border:1px solid var(--line-2); border-radius:10px;
          background:#12231b; transition:border-color .15s ease, box-shadow .15s ease; }
   .num:focus-within { border-color:var(--green); box-shadow:0 0 0 3px rgba(140,201,160,.18); }
-  .num input[type=number] { width:72px; border:0; background:transparent; text-align:right; padding:9px 6px 9px 10px;
+  .num input[type=number] { width:88px; border:0; background:transparent; text-align:right; padding:9px 6px 9px 10px;
                             font-weight:700; font-size:17px; -moz-appearance:textfield; appearance:textfield; }
   .num input[type=number]::-webkit-outer-spin-button, .num input[type=number]::-webkit-inner-spin-button { -webkit-appearance:none; margin:0; }
   .num input[type=number]:focus, .num input[type=number]:focus-visible { outline:none; box-shadow:none; border:0; }
@@ -163,6 +163,40 @@
   .ghost:hover { background:none; border-color:transparent; color:var(--text); text-decoration:underline; text-underline-offset:3px; }
   #btn-defaults { margin-left:auto; }
   @media (max-width:560px) { .ctl { gap:12px; } .num input[type=number] { width:60px; } }
+
+  /* ---- mode tertanam (iframe di dalam dashboard: /pengaturan?embed=1&theme=dark|light) ----
+     Tampilan ASLI dipertahankan utuh (kontur, stiker logo, kartu tembus pandang). Bingkai modal di dashboard tidak punya
+     header sendiri; yang ditambah di sini hanya: jarak lebih rapat dan bar Simpan yang menempel di dasar jendela. */
+  html.embed body { padding:14px 14px 0; }
+  html.embed main { margin-top:78px; padding-bottom:0; overflow:visible; }
+  html.embed header { margin-top:-78px; min-height:170px; }
+  html.embed .sticker, html.embed .sticker img { height:132px; }
+  html.embed section { padding-top:18px; }
+  /* Tombol Simpan + pesan (termasuk error validasi) menempel di dasar jendela: selalu kelihatan tanpa menggulir form.
+     Latar OPAK (bukan tembus pandang seperti kartu) supaya isian yang tergulir di bawahnya tidak tembus. */
+  html.embed .actions { position:sticky; bottom:0; z-index:2; margin:14px -20px 0; padding:12px 28px 14px; gap:6px;
+                        background:#14261e; border-top:1px solid var(--line); border-radius:0 0 21px 21px; }
+  html.embed .actions .primary { padding:12px 18px; }
+  html.embed .sec { margin-top:0; }
+  html.embed .ghost { padding:6px 4px; }
+  html.embed #msg { flex:1 1 100%; margin:2px 0 0; }
+  /* tema terang (dashboard bisa terang/gelap; wizard mandiri aslinya gelap). Hanya dipakai di mode tertanam. */
+  html[data-theme="light"] { color-scheme:light; --bg:#f9f6eb; --panel:#f9f6eb; --panel-2:#fffefa; --line:#e4dfd2; --line-2:#d3cdb9;
+    --text:#18382b; --text-2:#4a5a4c; --mut:#6e6a5c; --green:#3f7a57; --amber:#c07a1e; --bad:#c94f3d; } /* nilai SAMA dengan token tema terang di App.vue */
+  html[data-theme="light"] main { background:rgba(255,254,250,.88); border-color:#d9d3c0; box-shadow:0 24px 60px -30px rgba(40,55,40,.45); }
+  html[data-theme="light"] .topo::after { background:radial-gradient(ellipse 42% 55% at 50% 45%, rgba(63,122,87,.10), transparent 70%); }
+  html[data-theme="light"] .t-minor { stroke-opacity:.28; }
+  html[data-theme="light"] .t-index { stroke-opacity:.5; }
+  html[data-theme="light"] .sticker img { filter:drop-shadow(0 1px 0 rgba(0,0,0,.18)) drop-shadow(0 12px 14px rgba(40,50,35,.3)); }
+  html[data-theme="light"] .sticker::before { background:radial-gradient(closest-side, rgba(224,149,58,.18), transparent); }
+  html[data-theme="light"] .field { border-bottom-color:rgba(0,0,0,.08); }
+  html[data-theme="light"] input[type=number], html[data-theme="light"] select, html[data-theme="light"] .num { background:#fffefa; }
+  html[data-theme="light"] button:hover { background:#efe9d6; }
+  html[data-theme="light"] button.primary:hover { background:var(--btn-hover); }
+  html[data-theme="light"] .slider { background:linear-gradient(to right, var(--green) var(--p), #e3dcc6 var(--p)); border-color:#d3cdb9; }
+  html[data-theme="light"] #base-line { background:rgba(0,0,0,.03); }
+  html[data-theme="light"] #msg.err { color:#a3321f; }
+  html[data-theme="light"].embed .actions { background:#fffefa; }
   @media (prefers-reduced-motion:reduce) {
     .sticker, section, .dot.ok, .topo .a, .topo .b, .t-trail { animation:none; } button { transition:none; }
   }
@@ -210,7 +244,7 @@
         <button id="btn-port">Gunakan port ini</button>
       </div>
 
-      <div class="actions">
+      <div class="actions" id="actions">
         <button id="btn-save" class="primary">Simpan dan buka dashboard</button>
         <div class="sec">
           <button id="btn-back" class="ghost" hidden>Kembali</button>
@@ -254,7 +288,23 @@ function api(path, opts) {
   });
 }
 
+/* Mode tertanam: dibuka sebagai iframe di dalam dashboard. Setelah simpan, kabari dashboard (bukan pindah halaman,
+   karena "/" di dalam iframe akan memuat dashboard lagi di dalam dashboard). */
+var EMBED = /[?&]embed=1(&|$)/.test(location.search || "");
+if (EMBED && document.documentElement) {
+  document.documentElement.classList.add("embed");
+  var themeM = /[?&]theme=(light|dark)(&|$)/.exec(location.search || "");
+  if (themeM) document.documentElement.setAttribute("data-theme", themeM[1]);
+  $("btn-save").textContent = "Simpan";
+  $("actions").appendChild($("msg")); // pesan ikut menempel di bar bawah (lihat CSS .embed .actions)
+}
+
 function finish() {
+  if (EMBED && typeof window !== "undefined" && window.parent && window.parent !== window) {
+    showMsg("Tersimpan.", "ok");
+    window.parent.postMessage({ type: "silacak-settings-saved" }, location.origin);
+    return;
+  }
   showMsg("Tersimpan. Membuka dashboard...", "ok");
   setTimeout(function () { location.href = "/"; }, 800);
 }
@@ -285,7 +335,7 @@ function renderFields() {
     input.dataset.key = f.key;
     input.min = f.min;
     input.max = f.max;
-    input.step = f.type === "int" ? "1" : "any";
+    input.step = f.step ? String(f.step) : (f.type === "int" ? "1" : "any");
     input.value = f.value;
     var unit = document.createElement("span");
     unit.className = "unit";

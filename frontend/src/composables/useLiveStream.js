@@ -12,8 +12,9 @@ export function useLiveStream(onMessage) {
     source = new EventSource("/api/v1/stream");
 
     source.onmessage = (event) => {
+      const tSse = Date.now(); // waktu SSE tiba, dicatat SEBELUM parse (untuk pengukuran latensi di stores/latencyProbe.js)
       try {
-        onMessage(JSON.parse(event.data));
+        onMessage(JSON.parse(event.data), tSse);
       } catch (err) {
         console.error("Gagal parse event SSE:", err);
       }

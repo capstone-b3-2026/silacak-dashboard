@@ -15,7 +15,7 @@
         <div class="ph"><span class="tl">3 · Parameter relay</span></div>
         <div class="pb grid2">
           <label v-for="f in paramFields" :key="f.k"><span class="lbl">{{ f.label }}</span>
-            <input class="inp" type="number" :step="f.step" v-model.number="site.site.params[f.k]" />
+            <input class="inp" type="number" :step="f.step" :min="f.min" v-model.number="site.site.params[f.k]" />
           </label>
           <label v-for="f in budgetFields" :key="f.k"><span class="lbl">{{ f.label }}</span>
             <input class="inp" type="number" :step="f.step" v-model.number="site.site.params[f.k]" />
@@ -141,7 +141,7 @@ const paramFields = [
   { k: "max_hop_km", label: "Hop maks (km)", step: 0.1 },
   { k: "max_loss_db", label: "Redaman medan maks (dB)", step: 0.5 },
   { k: "dem_error_m", label: "Cadangan galat DEM (m)", step: 0.5 },
-  { k: "max_relays", label: "Relay maks", step: 1 },
+  { k: "max_relays", label: "Relay maks untuk saran otomatis (0 = hanya base)", step: 1, min: 0 },
   { k: "search_radius_km", label: "Radius cari (km)", step: 0.05 },
   { k: "search_step_km", label: "Langkah cari (km)", step: 0.01 },
 ];

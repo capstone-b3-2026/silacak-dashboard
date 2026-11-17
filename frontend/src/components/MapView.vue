@@ -45,6 +45,7 @@
         <div class="lg"><span class="sw circle" style="background: var(--violet)"></span>Relay</div>
         <div class="lg"><span class="sw circle" style="background: var(--green)"></span>Base</div>
         <div class="lg"><span class="sw line" style="background: var(--green)"></span>Link kuat</div>
+        <div class="lg" title="Dua garis putus-putus kuning di kiri-kanan jalur. Lebarnya mengikuti pengaturan; di luar garis ini alarm 'di luar jalur' menyala."><span class="sw line" style="background: #e0b050; opacity: 0.8"></span>Koridor ±{{ Math.round(appConfigStore.perimeterM) }} m</div>
         <div class="lg" title="Garis oranye di peta: tautan relay dengan sinyal pas-pasan (fade margin tipis). Hijau = kuat."><span class="sw line" style="background: var(--amber)"></span>Link marginal</div>
       </div>
     </div>
@@ -71,6 +72,7 @@ import { useSiteStore } from "../stores/site";
 import { useDeviceStore } from "../stores/devices";
 import { useSessionStore } from "../stores/sessions";
 import { useUiStore } from "../stores/ui";
+import { useAppConfigStore } from "../stores/appConfig";
 import { buildRoute, routeFeatureCollection, trailCorridor, unresolvedMessage } from "../utils/routeGeo";
 
 const props = defineProps({ theme: { type: String, default: "dark" } });
@@ -81,6 +83,7 @@ const hikerStore = useHikerStore();
 const alertStore = useAlertStore();
 const siteStore = useSiteStore();
 const uiStore = useUiStore();
+const appConfigStore = useAppConfigStore(); // lebar koridor (stagnant_perimeter_m) dari pengaturan operator
 const deviceStore = useDeviceStore(); // untuk memetakan ID relay di route_path ke posisinya
 const sessionStore = useSessionStore(); // untuk menampilkan NAMA pendaki (bukan sekadar kode alat) di popup/tooltip
 const is3d = ref(false);
@@ -473,13 +476,18 @@ function siteMarker(label, cls, lon, lat, title, { draggable = false, onDragEnd 
   return m;
 }
 
+// Railing koridor: tampil saat trail punya >=2 titik. Lebarnya = stagnant_perimeter_m dari /app-config (nilai yang SAMA
+// dipakai backend untuk alarm "di luar jalur" dan pemilihan jendela diam), jadi garis di peta ikut berubah begitu operator
+// menyimpan ambang baru. trailCorridor aman untuk trail 0/1 titik (koridor kosong, tidak melempar).
+function syncCorridor() {
+  if (!mapReady) return;
+  map.getSource("site-corridor")?.setData(trailCorridor(siteStore.site?.trail || [], appConfigStore.perimeterM));
+}
+
 function syncSite() {
   if (!mapReady) return;
   map.getSource("site")?.setData(siteGeo());
-  // Railing koridor: selalu tampil saat trail punya >=2 titik. 50 m mencerminkan backend
-  // stagnant_perimeter_m (ASUMSI — payload site belum membawa nilainya, jadi di-hardcode 50).
-  // trailCorridor aman untuk trail 0/1 titik (kembalikan koridor kosong, tidak melempar).
-  map.getSource("site-corridor")?.setData(trailCorridor(siteStore.site?.trail || [], 50));
+  syncCorridor();
   siteMarkers.forEach((m) => m.remove());
   siteMarkers = [];
   const st = siteStore.site;
@@ -526,7 +534,7 @@ onMounted(() => {
       layout: { "line-join": "round", "line-cap": "round" },
       paint: { "line-color": ["get", "color"], "line-width": 3.5, "line-opacity": 0.85 },
     });
-    // "Railing" koridor perimeter stagnan di sekitar trail: dua garis putus-putus NON-merah (kuning pudar,
+    // "Railing" koridor perimeter (lebar dari pengaturan operator) di sekitar trail: dua garis putus-putus NON-merah (kuning pudar,
     // konsisten dengan trail #e0a800 / batas DEM #e0b050 — merah khusus SOS). Ditaruh sebelum site-trail
     // supaya z-order di bawah garis trail dan di bawah marker (marker = elemen DOM, selalu di atas).
     map.addSource("site-corridor", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
@@ -602,6 +610,7 @@ watch(() => props.theme, applyRasterTheme);
 watch(topoReady, applyBasemap);
 watch(() => siteStore.site, () => { syncDem(); syncSite(); syncRoute(); }, { deep: true });
 watch(() => siteStore.showSetup, syncSite);
+watch(() => appConfigStore.perimeterM, syncCorridor);
 watch(() => siteStore.editMode, (m) => { if (map) map.getCanvas().style.cursor = m ? "crosshair" : ""; });
 
 watch(

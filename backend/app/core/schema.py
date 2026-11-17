@@ -217,6 +217,7 @@ ALTER TABLE positions ADD COLUMN IF NOT EXISTS time_from_gps BOOLEAN NOT NULL DE
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS speed_kph REAL;           -- speed_kph dari CSV_DATA (NULL = bit SpeedValid tidak di-set)
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS rtt_ms INTEGER;           -- RTT diukur pendaki, dari baris CSV_TIMING (NULL = laporan tidak sampai)
 ALTER TABLE positions ADD COLUMN IF NOT EXISTS sos BOOLEAN NOT NULL DEFAULT FALSE;  -- tombol SOS pendaki aktif saat paket ini dikirim (field ke-20 CSV_DATA)
+ALTER TABLE positions ADD COLUMN IF NOT EXISTS serial_read_at TIMESTAMPTZ;  -- saat baris serial DIBACA laptop (received_at = saat masuk DB); NULL = data lama
 
 -- sama dengan versi di init.sql + session_id (dipakai dashboard buat tahu kalau sesi berganti)
 CREATE OR REPLACE FUNCTION notify_position_insert() RETURNS trigger AS $$
@@ -241,6 +242,8 @@ BEGIN
             'gps_valid', NEW.gps_valid,
             'sos', NEW.sos,
             'recorded_at', NEW.recorded_at,
+            'time_from_gps', NEW.time_from_gps,
+            'serial_read_at', NEW.serial_read_at,
             'received_at', NEW.received_at
         )::text
     );
@@ -252,6 +255,20 @@ DROP TRIGGER IF EXISTS trg_notify_position ON positions;
 CREATE TRIGGER trg_notify_position
     AFTER INSERT ON positions
     FOR EACH ROW EXECUTE FUNCTION notify_position_insert();
+
+-- Satu paket radio = satu baris. Kunci: (pendaki, nomor urut firmware, jam GPS, status SOS). Paket ganda (relay + jalur
+-- langsung, tulis ulang serial, dsb.) ditolak lewat ON CONFLICT DO NOTHING di kode simpan, jadi tidak ikut terhitung
+-- sebagai "diterima" di PDR dan tidak memicu NOTIFY/SSE dua kali. `sos` ikut kunci supaya pergantian status SOS pada
+-- nomor urut + jam yang sama tidak hilang. recorded_at ada di kunci (syarat hypertable TimescaleDB).
+-- NULL sequence / paket tanpa jam GPS (recorded_at = waktu terima) tidak bisa dideduplikasi dan tetap tersimpan.
+-- Bila DB lama sudah berisi paket ganda, indeks TIDAK dibuat (tidak ada data yang dihapus otomatis): jalankan
+-- scripts/dedupe_positions.py lalu mulai ulang backend.
+DO $$
+BEGIN
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_positions_packet ON positions (hiker_id, sequence, recorded_at, sos);
+EXCEPTION WHEN unique_violation THEN
+    RAISE WARNING 'uq_positions_packet belum dibuat: ada paket ganda lama';
+END $$;
 """
 
 
@@ -314,4 +331,7 @@ async def ensure_schema(conn) -> bool:
     await conn.execute(MIGRATE_GEOGRAPHY_SQL)
     await conn.execute(SCHEMA_SQL)
     await conn.execute(RELAY_STATUS_SQL)
+    if not await conn.fetchval("SELECT 1 FROM pg_indexes WHERE indexname = 'uq_positions_packet'"):
+        log.warning("Indeks anti-paket-ganda (uq_positions_packet) belum ada karena data lama berisi paket ganda. "
+                    "Paket baru tetap diterima apa adanya. Jalankan: python scripts/dedupe_positions.py --apply, lalu mulai ulang.")
     return await _try_timescale(conn)

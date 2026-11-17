@@ -139,4 +139,17 @@ assert.ok(loL0 > 100 && laL0 < 0);
 const offMagLat = Math.abs(laL0 - laTrail0);
 assert.ok(offMagLat > 0 && offMagLat < 0.002);
 
+// ── lebar koridor mengikuti argumen (dasar fitur "garis koridor ikut berubah saat ambang diatur") ──
+{
+  const trail = [[-7.600, 110.400], [-7.590, 110.400]]; // lurus ke utara: rel kiri/kanan = geser murni ke timur/barat
+  const distOfRail = (m) => {
+    const rail = trailCorridor(trail, m).features.find((f) => f.properties.side === "left").geometry.coordinates[0];
+    return haversineM([trail[0][0], trail[0][1]], [rail[1], rail[0]]); // rail = [lon, lat] -> haversineM butuh [lat, lon]
+  };
+  for (const m of [10, 50, 120, 500]) assert.ok(Math.abs(distOfRail(m) - m) / m < 0.01, `rel pada ${m} m berjarak ${distOfRail(m)} m dari trail`);
+  assert.ok(distOfRail(120) > distOfRail(50) * 2.3, "koridor 120 m harus lebih lebar dari 50 m");
+  // nilai bawaan 50 m dipakai bila argumen tidak diberikan (perilaku lama tidak berubah)
+  assert.deepEqual(trailCorridor(trail), trailCorridor(trail, 50));
+}
+
 console.log("routeGeo: semua OK");

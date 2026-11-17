@@ -14,7 +14,8 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.database import get_db
 from app.repositories import position_repo
-from app.services import liveness
+from app.services import clock_check, liveness
+from app.services.serial_ingest import serial_ingest
 
 router = APIRouter(prefix="/diagnostics", tags=["diagnostics"])
 
@@ -63,6 +64,29 @@ async def _base_xy(conn):
 
 def _f(v, nd=2):
     return None if v is None else round(float(v), nd)
+
+
+@router.get("/serial-timing")
+async def serial_timing():
+    """Penumpukan paket antara penerimaan radio di base dan pembacaan serial di laptop (lihat services/serial_timing.py)."""
+    return serial_ingest.timing_stats()
+
+
+async def _recent_latencies(conn) -> list[float]:
+    """Latensi (detik) 50 paket berjam-GPS terbaru per sesi aktif, untuk menilai kesinkronan jam laptop."""
+    rows = await conn.fetch(
+        """
+        SELECT EXTRACT(EPOCH FROM q.received_at - q.recorded_at)::float8 AS lat
+        FROM hiking_sessions s
+        CROSS JOIN LATERAL (
+            SELECT p.received_at, p.recorded_at FROM positions p
+            WHERE p.session_id = s.id AND p.time_from_gps
+            ORDER BY p.recorded_at DESC LIMIT 50
+        ) q
+        WHERE s.status = 'active'
+        """
+    )
+    return [r["lat"] for r in rows]
 
 
 @router.get("")
@@ -129,7 +153,8 @@ async def session_diagnostics(conn=Depends(get_db)):
             "stale_after_s": _f(stale_after, 0),
         })
     # stale_after_s tingkat atas = cadangan; ambang sebenarnya per sesi ada di sessions[].stale_after_s
-    return {"stale_after_s": liveness.FALLBACK_S, "base_set": blat is not None, "sessions": out}
+    return {"stale_after_s": liveness.FALLBACK_S, "base_set": blat is not None, "sessions": out,
+            "clock_check": clock_check.assess(await _recent_latencies(conn))}
 
 
 @router.get("/{hiker_code}/packets")
@@ -142,7 +167,7 @@ async def packet_log(hiker_code: str, limit: int = Query(60, ge=1, le=500), conn
     rows = await conn.fetch(
         """
         SELECT p.sequence, p.recorded_at, p.received_at, p.rssi_dbm, p.hop_count, p.route_path,
-               p.satellites, p.hdop, p.missing_since_previous,
+               p.satellites, p.hdop, p.missing_since_previous, p.serial_read_at,
                COALESCE(p.gps_valid, p.location IS NOT NULL) AS gps_valid,
                CASE WHEN p.time_from_gps THEN EXTRACT(EPOCH FROM p.received_at - p.recorded_at) END AS latency_s,
                CASE WHEN $2::float8 IS NULL OR p.location IS NULL THEN NULL
@@ -155,4 +180,7 @@ async def packet_log(hiker_code: str, limit: int = Query(60, ge=1, le=500), conn
         "rssi_dbm": r["rssi_dbm"], "hop_count": r["hop_count"], "route_path": r["route_path"],
         "satellites": r["satellites"], "hdop": r["hdop"], "missing_since_previous": r["missing_since_previous"],
         "gps_valid": r["gps_valid"], "latency_s": _f(r["latency_s"]), "dist_to_base_m": _f(r["dist_m"], 0),
+        # tahap latensi di sisi laptop: baca serial -> masuk DB (NULL pada data lama)
+        "serial_read_at": r["serial_read_at"].isoformat() if r["serial_read_at"] else None,
+        "read_to_db_s": _f((r["received_at"] - r["serial_read_at"]).total_seconds(), 3) if r["serial_read_at"] else None,
     } for r in rows]

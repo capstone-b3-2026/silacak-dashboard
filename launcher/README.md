@@ -8,7 +8,7 @@ dashboard terbuka di browser, base station dikenali otomatis. Tanpa Docker, Node
 2. Menyiapkan klaster PostgreSQL portable di `%LOCALAPPDATA%\SiLacak\pgdata` (hanya `127.0.0.1`), lalu membuat database.
 3. Pertama kali: membuka wizard `/awal`. "Tidak" atau "Tidak tahu" memakai nilai bawaan (dari `backend/app/core/config.py`, dijaga
    sama dengan `backend/.env.example` oleh tes); "Ya" membuka formulir berlabel bahasa biasa (parameter alarm stagnan, pilihan port base).
-   Pilihan disimpan di `data\app_settings.json` dan langsung berlaku tanpa restart; bisa diubah lagi di `http://127.0.0.1:<port>/pengaturan`.
+   Pilihan disimpan di `data\app_settings.json` dan langsung berlaku tanpa restart; bisa diubah lagi lewat tombol Pengaturan (ikon penggeser) di topbar dashboard, atau di `http://127.0.0.1:<port>/pengaturan`. Jendela Edge `--app` tidak punya address bar, jadi tombol ini satu-satunya jalan masuk bagi operator.
    Menutup wizard tanpa menjawab tidak memblokir apa pun.
 4. Menjalankan backend yang sekaligus menyajikan dashboard dan membaca USB serial base station (`SERIAL_PORT=auto`).
 5. Membuka jendela dashboard (Edge `--app --start-fullscreen` bila ada, jika tidak browser bawaan). Mode layar penuh menyembunyikan title bar agar terasa seperti aplikasi native; operator tetap bisa keluar dengan F11 atau menutup dengan Alt+F4. Ikon jendela/taskbar memakai logo aplikasi (favicon di `frontend/index.html`).
@@ -78,5 +78,5 @@ dan paket hilang). Backend membukanya seperti port serial (`socket://127.0.0.1:7
 auto-reconnect ikut teruji. Tidak teruji: kabel USB, driver CH340/CP210x, dan radio LoRa. Langkahnya ada di docstring skrip itu.
 
 ## Belum ada (Fase 2/3)
-Tombol "Pengaturan" di dalam dashboard Vue (sekarang hanya lewat alamat /pengaturan), ekspor/impor "paket lokasi", ikon tray, bundel driver USB (CP210x/CH340),
+ekspor/impor "paket lokasi", ikon tray, bundel driver USB (CP210x/CH340),
 pipeline rilis, penanganan SmartScreen. (Installer `.exe` sudah ada skripnya -- lihat bagian "Installer .exe" di atas -- tetapi belum diuji build/round trip di Windows.)
