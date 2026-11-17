@@ -197,6 +197,26 @@ npm run dev
 
 Vite berjalan di http://localhost:5173 dan meneruskan `/api` ke http://localhost:8000.
 
+### Memasang lewat installer (Windows)
+
+Untuk dipakai di basecamp tanpa Docker, unduh `SiLacak-Setup.exe` dari halaman Releases repositori ini. Arsip portabel (`SiLacak-windows.zip`) juga tersedia di rilis yang sama.
+
+Unduh lewat terminal, jangan lewat peramban. Windows menandai berkas yang diunduh peramban sebagai "berasal dari internet", dan installer yang belum ditandatangani biasanya ditahan atau diperingatkan oleh SmartScreen dan antivirus. Unduhan lewat terminal tidak diberi tanda itu, sehingga peringatannya umumnya tidak muncul. Itu hanya soal penandaan; installer tetap belum bertanda tangan digital.
+
+Repositori ini privat, jadi `curl` ke alamat rilis akan gagal (404). Pakai GitHub CLI:
+
+```bash
+winget install --id GitHub.cli
+gh auth login
+gh release download --repo capstone-b3-2026/silacak-dashboard --pattern "SiLacak-Setup.exe"
+```
+
+Perintah terakhir mengunduh rilis terbaru ke folder saat ini. Untuk versi tertentu, tambahkan nomor tag setelah `download`, mis. `gh release download v0.2.0 --repo ...`. Akun GitHub yang dipakai pada `gh auth login` harus punya akses ke repositori.
+
+Bila `gh` tidak ditemukan setelah dipasang, tutup dan buka ulang terminal. Pada Git Bash (MSYS2/UCRT64) PATH Windows tidak selalu ikut, jadi tambahkan sekali: `echo 'export PATH="$PATH:/c/Program Files/GitHub CLI"' >> ~/.bashrc`, lalu buka terminal baru.
+
+Setelah terunduh, jalankan `SiLacak-Setup.exe` dari folder tempat berkas itu disimpan.
+
 ## Cara Penggunaan
 
 ### A. Persiapan lokasi (sekali per lokasi uji)
@@ -660,6 +680,7 @@ Urutan disarankan dari yang paling mendesak.
 - Proses DEM yang terputus karena backend mati ditandai galat pada startup berikutnya, agar tidak terlihat memproses selamanya.
 - Perubahan skema dilakukan lewat `schema.py` (idempotent) dan berlaku untuk basis data baru maupun lama.
 - Koordinat bawaan pada peta dan data sintetis diarahkan ke Bukit Klangon (Cangkringan, Sleman) sebagai perkiraan dari sumber online, bukan hasil digitasi GPX. Bila jalur target berada di kawasan taman nasional, pastikan izin masuk dan status akses jalur terbaru sebelum uji lapangan.
+
 ## Status kekurangan yang tercatat di laporan
 
 Dipisahkan menurut apa yang menghalangi. Yang bertanda **dikerjakan** sudah ada kodenya dan tesnya; itu tidak sama dengan "sudah
