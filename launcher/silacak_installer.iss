@@ -29,7 +29,7 @@
 ; Versi installer. Selaraskan dengan rilis bila perlu; bisa ditimpa dari ISCC
 ; lewat /DAppVersion=... pada baris perintah.
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.1"
 #endif
 
 ; Lokasi relatif dari berkas .iss ini (launcher\) ke akar repo.
