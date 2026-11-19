@@ -18,6 +18,11 @@ Skenario bawaan: 2 pendaki (node 11, 12) naik di jalur Bukit Klangon; tiap ~12 p
 bukan titik (0,0)); sesekali nomor urut loncat (paket hilang). Opsi --drop-after N memutus koneksi tiap N baris
 untuk menguji auto-reconnect.
 
+Uji PENUMPUKAN antara radio base dan pembacaan serial (services/serial_timing.py): --stall-every N --stall-seconds S menahan
+semua baris selama S detik tiap N putaran, lalu melepas semuanya sekaligus. Jam base di baris itu tetap waktu "diterima radio",
+persis seperti firmware yang punya antrean kirim serial tertahan. Cek hasilnya di /api/v1/diagnostics/serial-timing
+(verdict "tertahan_sebelum_dibaca"); tanpa opsi ini verdict-nya "tidak_ada_penumpukan".
+
 Rute lewat relay (firmware menulis ID node relay mentah, mis. "R5>R6"):
   python backend\\scripts\\fake_base.py --relay-route 5,6 --routed-nodes 12
 membuat H12 selalu lewat relay node 5 lalu 6 (hop 2) sementara H11 tetap langsung. Daftarkan perangkat relay
@@ -64,16 +69,23 @@ def serve(args) -> None:
     routed = {int(x) for x in args.routed_nodes.split(",") if x.strip()}
     seq = {n: 0 for n in nodes}
     total_missing = {n: 0 for n in nodes}
+    stall_rounds = max(1, round(args.stall_seconds / args.interval)) if args.stall_every else 0
     progress = {n: 0.0 for n in nodes}
     print(f"Base palsu siap di socket://{args.host}:{args.port}  (node {nodes}). Ctrl+C untuk berhenti.")
     while True:
         conn, addr = srv.accept()
         print(f"Backend tersambung dari {addr}.")
         sent = 0
+        rnd = 0
+        stall_left = 0
+        pending = []          # baris yang sudah "diterima radio" tetapi belum dikirim ke serial (simulasi antrean tertahan)
         t0 = time.monotonic()
         try:
             conn.sendall(b"[INFO] base palsu siap\n")
             while True:
+                rnd += 1
+                if args.stall_every and rnd % args.stall_every == 0 and stall_left == 0:   # tidak menumpuk penahanan yang sedang berjalan
+                    stall_left = stall_rounds
                 for n in nodes:
                     missing = 0
                     if seq[n] and seq[n] % 17 == 0:  # simulasi paket hilang
@@ -83,12 +95,21 @@ def serve(args) -> None:
                     seq[n] += 1
                     progress[n] = (progress[n] + 0.01) % 1.0
                     nofix = seq[n] % 12 == 0
-                    conn.sendall(line(n, seq[n], int((time.monotonic() - t0) * 1000), progress[n], nofix,
-                                      missing, total_missing[n], relay_route if n in routed else ()).encode())
+                    data = line(n, seq[n], int((time.monotonic() - t0) * 1000), progress[n], nofix,
+                                missing, total_missing[n], relay_route if n in routed else ()).encode()
+                    if stall_left > 0:
+                        pending.append(data)
+                    else:
+                        conn.sendall(data)
                     sent += 1
                     if args.drop_after and sent >= args.drop_after:
                         print(f"--drop-after {args.drop_after}: memutus koneksi (uji auto-reconnect).")
                         raise ConnectionAbortedError
+                if stall_left > 0:
+                    stall_left -= 1
+                    if stall_left == 0 and pending:   # lepas semuanya sekaligus
+                        conn.sendall(b"".join(pending))
+                        pending.clear()
                 time.sleep(args.interval)
         except (ConnectionError, OSError):
             print("Koneksi putus; menunggu backend tersambung lagi...")
@@ -104,6 +125,8 @@ if __name__ == "__main__":
     ap.add_argument("--interval", type=float, default=1.0, help="detik antar putaran (firmware real: ~5)")
     ap.add_argument("--relay-route", default="", help="ID node relay yang dilewati, urut dari pendaki ke base, mis. 5,6")
     ap.add_argument("--routed-nodes", default="12", help="pendaki yang memakai --relay-route (bawaan: 12)")
+    ap.add_argument("--stall-every", type=int, default=0, help="tahan baris tiap N putaran lalu lepas sekaligus (0 = tidak)")
+    ap.add_argument("--stall-seconds", type=float, default=8.0, help="lama penahanan, detik (dipakai bersama --stall-every)")
     ap.add_argument("--drop-after", type=int, default=0, help="putus koneksi setelah N baris (0 = tidak)")
     try:
         serve(ap.parse_args())

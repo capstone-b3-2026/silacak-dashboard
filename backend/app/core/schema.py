@@ -310,6 +310,11 @@ CREATE INDEX IF NOT EXISTS idx_node_boots_node_time ON node_boots (node_id, rece
 """
 
 
+async def packet_index_exists(conn) -> bool:
+    """Apakah indeks anti-paket-ganda (uq_positions_packet) sudah ada. False = DB lama masih berisi paket ganda (lihat scripts/dedupe_positions.py)."""
+    return bool(await conn.fetchval("SELECT 1 FROM pg_indexes WHERE indexname = 'uq_positions_packet'"))
+
+
 async def _try_timescale(conn) -> bool:
     """Opsional: jadikan positions hypertable kalau TimescaleDB tersedia. Tidak pernah fatal."""
     try:

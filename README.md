@@ -681,6 +681,19 @@ Urutan disarankan dari yang paling mendesak.
 - Perubahan skema dilakukan lewat `schema.py` (idempotent) dan berlaku untuk basis data baru maupun lama.
 - Koordinat bawaan pada peta dan data sintetis diarahkan ke Bukit Klangon (Cangkringan, Sleman) sebagai perkiraan dari sumber online, bukan hasil digitasi GPX. Bila jalur target berada di kawasan taman nasional, pastikan izin masuk dan status akses jalur terbaru sebelum uji lapangan.
 
+## Pengujian tanpa perangkat keras
+
+Tidak semua hal bisa diuji tanpa perangkat keras, dan tabel ini sengaja memisahkan apa yang dibuktikan tiap cara dan apa yang tidak.
+
+| Cara | Perintah | Membuktikan | TIDAK membuktikan |
+|---|---|---|---|
+| Tes otomatis | `python -m unittest discover -s tests -t .`, `node tests/wizard_dom_test.js`, `node src/utils/*.test.mjs` di `frontend/` | Logika murni, validasi, perilaku halaman pengaturan | Perilaku pada data dan perangkat nyata |
+| Integrasi PostgreSQL | `SILACAK_TEST_DB=postgresql://.../silacak_test python -m unittest tests.test_db_integration` (database kosong berakhiran `_test`) | Skema dan indeks anti-paket-ganda, penolakan paket ganda, notifikasi, retensi, kecocokan replay stagnan dengan query SQL asli | Data lapangan |
+| Simulator base lewat soket | `python backend/scripts/fake_base.py --port 7777 [--stall-every 40 --stall-seconds 4]` lalu jalankan backend dengan `SERIAL_PORT=socket://127.0.0.1:7777` | Seluruh jalur serial -> database -> SSE -> layar, pengukur penumpukan (opsi `--stall-*` menahan paket lalu melepasnya sekaligus), latensi di sisi laptop | Kabel USB, driver, chip USB-serial, radio LoRa, galat GPS |
+| Log mentah sesi lama | `python scripts/analyze_raw_log.py <folder data>/raw` | Penumpukan base -> serial yang NYATA terjadi pada sesi perangkat keras sebelumnya (log mentah aktif secara bawaan) | Kondisi yang belum pernah direkam |
+| Rekaman jalan sesi lama | Ekspor CSV dari aplikasi, lalu `python scripts/eval_alarms.py --fixes ... --trail ...` | Alarm palsu OFF_TRAIL dan STAGNANT pada data nyata yang sudah ada | Kondisi lain (kanopi lebat, cuaca, pola istirahat berbeda) |
+| Paket ganda di data lama | `python scripts/dedupe_positions.py` (dry run) | Berapa paket ganda yang benar-benar ada di database | Penyebab paket ganda |
+
 ## Status kekurangan yang tercatat di laporan
 
 Dipisahkan menurut apa yang menghalangi. Yang bertanda **dikerjakan** sudah ada kodenya dan tesnya; itu tidak sama dengan "sudah
@@ -688,7 +701,7 @@ dikalibrasi" atau "sudah memenuhi hukum": angka dan keputusan akhirnya tetap but
 
 | Kekurangan | Status | Keterangan |
 |---|---|---|
-| Penyebab penumpukan paket base -> baca serial | **Alat ukur dikerjakan**, penyebabnya belum diketahui | Firmware base SUDAH mengirim `base_received_uptime_ms` di tiap `CSV_DATA`. Backend membandingkan selisihnya dengan jam baca laptop dan melaporkan penundaan ekstra serta apakah penahannya di laptop atau sebelum pembacaan: `GET /api/v1/diagnostics/serial-timing` (juga kartu "Penumpukan paket di serial" di tab Link). Menunjuk satu penyebab pasti (antrean TX serial di firmware, buffer USB-serial, atau driver) masih butuh pengukuran di sisi firmware. |
+| Penyebab penumpukan paket base -> baca serial | **Alat ukur dikerjakan**, penyebabnya belum diketahui | Firmware base SUDAH mengirim `base_received_uptime_ms` di tiap `CSV_DATA`. Backend membandingkan selisihnya dengan jam baca laptop dan melaporkan penundaan ekstra serta apakah penahannya di laptop atau sebelum pembacaan: `GET /api/v1/diagnostics/serial-timing` (juga kartu "Penumpukan paket di serial" di tab Link). Menunjuk satu penyebab pasti (antrean TX serial di firmware, buffer USB-serial, atau driver) masih butuh pengukuran di sisi firmware. Sesi lama bisa dianalisis ulang dari log mentah: `python scripts/analyze_raw_log.py <folder data>/raw`. Mekanisme deteksi diuji dengan simulator (`fake_base.py --stall-every N --stall-seconds S`). |
 | Waktu tiba SSE dan penggambaran di peramban | **Dikerjakan** | Tiap paket posisi dicatat: SSE tiba, lalu layar diperbarui (aproksimasi: DOM selesai + satu frame dicat). Ringkasan p50/p95 per tahap dan unduh CSV ada di tab Link. `serial_read_at` (laptop membaca baris) kini disimpan dan ikut di NOTIFY, jadi tahap baca-serial -> DB -> SSE -> layar terukur terpisah. Selisih yang melibatkan jam GPS hanya sah bila jam laptop sinkron. |
 | Kalibrasi perencana relay dengan RSSI lapangan; sensitivitas | **Butuh data lapangan** | Alat kalibrasinya sudah ada: `GET /api/v1/sites/active/calibration` membandingkan RSSI terukur dengan prediksi dan menaksir `calib_offset_db`, simpangan (untuk `fade_margin_db`), dan kemiringan sisa (penanda bentuk model keliru). Model yang dipakai perencana memakai FSPL + difraksi medan + vegetasi + satu offset, TIDAK memiliki eksponen `n` atau `a`; istilah itu milik model simulasi lain. Sensitivitas pada laju data udara yang dipakai harus diukur dengan perangkat keras (kurva paket-hilang terhadap daya). |
 | Kalibrasi ambang Auto-SOS dan OFF_TRAIL; evaluasi alarm palsu | **Alat evaluasi dikerjakan**, kalibrasi butuh data | `python scripts/eval_alarms.py --fixes rekaman.csv --trail jalur.gpx [--truth truth.csv] --grid "perimeter=20,50,100;debounce=1,3,5"` memutar ulang rekaman dengan rumus detektor yang sama dan menghitung alarm palsu serta tunda deteksi per kombinasi. Logika STAGNANT-nya dicocokkan dengan query SQL asli di `tests/test_db_integration.py`. Ambang yang aman tetap harus ditetapkan dari banyak rekaman (kanopi, cuaca, pola istirahat). |

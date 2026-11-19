@@ -115,7 +115,11 @@
           <div class="ph"><div class="tl"><svg class="ic" viewBox="0 0 24 24"><path d="M5 12a7 7 0 0 1 14 0M8.5 12a3.5 3.5 0 0 1 7 0" /><circle cx="12" cy="12" r="1" /></svg>Link radio aktif</div><div class="sv">{{ diagStore.list.length }}</div></div>
           <div class="pb" style="overflow-y: auto; flex: 1; min-height: 0">
             <!-- Kesehatan jalur data di sisi laptop: jam, penumpukan serial, dan waktu sampai ke layar -->
-            <div v-if="showClockWarn || showSerial || probeReady" class="lnkl" style="margin-bottom: 6px">
+            <div v-if="!diagStore.packetIndex || showClockWarn || showSerial || probeReady" class="lnkl" style="margin-bottom: 6px">
+              <div v-if="!diagStore.packetIndex" class="lnk">
+                <div class="etit"><span>Perlindungan paket ganda belum aktif</span><span class="bdg warn">Perlu tindakan</span></div>
+                <div class="emeta">Database lama berisi paket ganda, jadi indeks anti-ganda belum dibuat dan paket ganda baru masih bisa tersimpan. Cadangkan data, jalankan <b>python scripts/dedupe_positions.py --apply</b>, lalu mulai ulang aplikasi.</div>
+              </div>
               <div v-if="showClockWarn" class="lnk">
                 <div class="etit"><span>Jam laptop tidak sinkron</span><span class="bdg warn">Periksa</span></div>
                 <div class="emeta">{{ diagStore.clock.message }}</div>
