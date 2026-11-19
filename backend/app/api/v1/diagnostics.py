@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.core.database import get_db
 from app.repositories import position_repo
+from app.core import schema
 from app.services import clock_check, liveness
 from app.services.serial_ingest import serial_ingest
 
@@ -154,7 +155,8 @@ async def session_diagnostics(conn=Depends(get_db)):
         })
     # stale_after_s tingkat atas = cadangan; ambang sebenarnya per sesi ada di sessions[].stale_after_s
     return {"stale_after_s": liveness.FALLBACK_S, "base_set": blat is not None, "sessions": out,
-            "clock_check": clock_check.assess(await _recent_latencies(conn))}
+            "clock_check": clock_check.assess(await _recent_latencies(conn)),
+            "packet_index": await schema.packet_index_exists(conn)}
 
 
 @router.get("/{hiker_code}/packets")

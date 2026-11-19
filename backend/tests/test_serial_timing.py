@@ -43,6 +43,20 @@ class Timing(unittest.TestCase):
         self.assertGreater(s["tunda_ekstra_s"]["max"], 15.0)           # paket ke-20 tertahan ~20 dtk
         self.assertGreaterEqual(s["terkumpul"]["kejadian"], 4)
 
+    def test_buffer_penuh_saat_dilepas_dari_hulu_tetap_dianggap_tertahan_sebelum_dibaca(self):
+        # paket dilepas sekaligus dari hulu: begitu baris pertama terbaca, sisa baris sudah menunggu di buffer (backlog besar),
+        # tetapi laptop memprosesnya cepat. Ini BUKAN laptop lambat.
+        b = TimingBuffer()
+        for i in range(60):
+            base_ms = 10_000 + i * 5000
+            host = 1000.0 + i * 5.0
+            if 30 <= i <= 34:
+                host = 1000.0 + 34 * 5.0 + (i - 30) * 0.01
+            b.add(host, base_ms, 600 if 30 <= i <= 33 else 0, 15.0)
+        s = b.stats()
+        self.assertEqual(s["verdict"], "tertahan_sebelum_dibaca")
+        self.assertGreaterEqual(s["backlog_byte"]["max"], 600)
+
     def test_host_lambat_dibedakan_dari_penahan_sebelum_baca(self):
         b = TimingBuffer()
         for i in range(60):
@@ -64,6 +78,18 @@ class Timing(unittest.TestCase):
         self.assertEqual(s["n_epoch"], 40)
         self.assertEqual(s["verdict"], "tidak_ada_penumpukan")
         self.assertLess(s["tunda_ekstra_s"]["max"], 0.01)
+
+    def test_ambang_terkumpul_mengikuti_laju_paket(self):
+        # laju cepat (0,25 dtk/paket): satu paket tertahan 3 dtk lalu dilepas; selisih baca-vs-terima per paket hanya 0,25 dtk
+        b = TimingBuffer()
+        for i in range(80):
+            host = 100.0 + i * 0.25
+            if 30 <= i <= 41:
+                host = 100.0 + 41 * 0.25 + (i - 30) * 0.001
+            b.add(host, 1000 + i * 250, 0, 3.0)
+        s = b.stats()
+        self.assertEqual(s["verdict"], "tertahan_sebelum_dibaca")
+        self.assertGreater(s["terkumpul"]["kejadian"], 0)
 
     def test_tanpa_jam_base_dilewati(self):
         b = TimingBuffer()

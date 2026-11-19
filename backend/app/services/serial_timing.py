@@ -10,11 +10,16 @@ antarpaket.
 Paket yang tertahan lalu dilepas sekaligus (buffer USB/driver/firmware) tampil sebagai: selisih baca jauh lebih kecil daripada
 selisih base ("terkumpul"). Pembedaan sumber penumpukan:
 
-  - `host_tertinggal`: laptop sendiri lambat (pemrosesan per paket >= ~1 dtk atau ada data menunggu di buffer serial
-    setelah satu baris dibaca). Perbaikan di sisi aplikasi/DB.
-  - `tertahan_sebelum_dibaca`: laptop membaca cepat dan buffer kosong, tetapi paket tiba berkelompok. Penahan ada SEBELUM
+  - `host_tertinggal`: laptop sendiri lambat memproses paket (dari dibaca sampai tersimpan di DB >= ~1 dtk di persentil 95).
+    Perbaikan di sisi aplikasi/DB.
+  - `tertahan_sebelum_dibaca`: paket tiba berkelompok padahal laptop memproses tiap paket cepat. Penahan ada SEBELUM
     pembacaan: antrean kirim serial di firmware base, buffer/latency timer chip USB-serial, atau driver. Perlu bukti di sisi
     firmware (mis. hitung kedalaman antrean TX serial base) untuk memastikan yang mana.
+
+Yang TIDAK dipakai membedakan: jumlah byte yang menunggu di buffer serial. Paket yang dilepas sekaligus dari hulu juga
+membuat buffer penuh begitu baris pertamanya terbaca, jadi angka itu hanya dicatat sebagai keterangan. Batas: bila
+pembaca serial terblokir di LUAR pemrosesan paket (mis. laptop membeku, antivirus menahan proses), penahanan itu tampak
+sebagai "tertahan_sebelum_dibaca" karena tidak terlihat dari dalam aplikasi.
   - `tidak_ada_penumpukan`: penundaan ekstra kecil.
 
 Batas pengukuran (jangan dilebih-lebihkan): menangkap penundaan RELATIF dalam jendela, bukan latensi absolut; jam kristal
@@ -27,10 +32,9 @@ import time
 from collections import deque
 
 MIN_PACKETS = 20          # di bawah ini verdict = belum_cukup_data
-CATCHUP_S = 0.5           # baca lebih cepat dari terima sebesar ini (dtk) = satu kejadian "terkumpul"
+CATCHUP_S = 0.5           # baca lebih cepat dari terima sebesar ini (dtk) = satu kejadian "terkumpul" (batas atas; lihat thr di stats)
 EXTRA_DELAY_OK_S = 0.25   # p95 tunda ekstra di bawah ini dianggap tidak ada penumpukan
 SLOW_PROC_MS = 1000.0     # pemrosesan per paket (baca -> tersimpan di DB) setinggi ini = host lambat
-BACKLOG_BYTES = 150       # sisa byte di buffer serial setelah satu baris dibaca; ~1 baris CSV_DATA
 BASE_RESET_BACK_MS = 1000  # base_ms mundur lebih dari ini = base reboot -> mulai referensi baru
 BASE_MAX_FWD_S = 3600     # lompatan maju base_ms lebih dari 1 jam antar paket = tidak masuk akal -> mulai referensi baru
 
@@ -83,12 +87,11 @@ class TimingBuffer:
         d = [(e["mono"] - cur[0]["mono"]) - (e["base_ms"] - cur[0]["base_ms"]) / 1000.0 for e in cur]
         base = min(d)
         extra = [x - base for x in d]
-        catch = []  # seberapa jauh baca "mengejar" terima antar dua paket berurutan
-        for a, b in zip(cur, cur[1:]):
-            read_gap = b["mono"] - a["mono"]
-            base_gap = (b["base_ms"] - a["base_ms"]) / 1000.0
-            if base_gap - read_gap > CATCHUP_S:
-                catch.append(base_gap - read_gap)
+        pairs = [(y["mono"] - x["mono"], (y["base_ms"] - x["base_ms"]) / 1000.0) for x, y in zip(cur, cur[1:])]
+        gaps = sorted(bg for _, bg in pairs if bg > 0)
+        # ambang "terkumpul" mengikuti laju paket: setengah selisih antarpaket yang lazim, paling besar CATCHUP_S
+        thr = min(CATCHUP_S, 0.5 * gaps[len(gaps) // 2]) if gaps else CATCHUP_S
+        catch = [bg - rg for rg, bg in pairs if bg - rg > thr]  # seberapa jauh baca "mengejar" terima antar dua paket berurutan
         bl = [e["backlog"] for e in cur if e["backlog"] is not None]
         pm = [e["proc_ms"] for e in cur if e["proc_ms"] is not None]
         out["tunda_ekstra_s"] = {"p50": _r(_pct(extra, .5)), "p95": _r(_pct(extra, .95)), "max": _r(max(extra))}
@@ -101,16 +104,16 @@ class TimingBuffer:
             out.update(verdict="belum_cukup_data", explanation=f"Baru {len(cur)} paket sejak base terakhir menyala; butuh minimal {MIN_PACKETS}.")
             return out
         p95 = out["tunda_ekstra_s"]["p95"] or 0.0
-        slow = (out["proses_ms"]["p95"] or 0.0) >= SLOW_PROC_MS or (out["backlog_byte"]["p95"] or 0) >= BACKLOG_BYTES
+        slow = (out["proses_ms"]["p95"] or 0.0) >= SLOW_PROC_MS
         if p95 < EXTRA_DELAY_OK_S and not catch:
             out.update(verdict="tidak_ada_penumpukan", explanation="Paket dibaca laptop selaras dengan saat diterima base.")
         elif slow:
             out.update(verdict="host_tertinggal",
-                       explanation="Laptop terlambat membaca: pemrosesan per paket lama atau ada data menunggu di buffer serial. "
+                       explanation="Laptop lambat memproses paket (dari dibaca sampai tersimpan di database lama). "
                                    "Periksa kecepatan database dan beban laptop.")
         else:
             out.update(verdict="tertahan_sebelum_dibaca",
-                       explanation="Laptop membaca cepat dan buffer kosong, tetapi paket tiba berkelompok. Penahan ada sebelum "
+                       explanation="Laptop memproses tiap paket cepat, tetapi paket tiba berkelompok. Penahan ada sebelum "
                                    "pembacaan (antrean serial di base, buffer/latency timer USB-serial, atau driver). Lanjutkan "
                                    "dengan mengukur kedalaman antrean TX serial di firmware base.")
         return out

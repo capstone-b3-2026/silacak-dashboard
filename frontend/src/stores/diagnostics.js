@@ -4,7 +4,7 @@ import { fetchDiagnostics, fetchPackets, fetchSerialTiming } from "../services/a
 // Diagnostik link per sesi aktif (PDR, latency, node basi, jarak ke base) + packet log pendaki terpilih.
 // Polling ringan: dashboard lokal, dan indikator "basi" memang perlu dihitung ulang berkala.
 export const useDiagnosticsStore = defineStore("diagnostics", {
-  state: () => ({ sessions: {}, staleAfterS: 120, baseSet: false, packets: [], packetsFor: null, trend: [], trendFor: null, clock: null, serialTiming: null }),
+  state: () => ({ sessions: {}, staleAfterS: 120, baseSet: false, packets: [], packetsFor: null, trend: [], trendFor: null, clock: null, serialTiming: null, packetIndex: true }),
   getters: {
     list: (s) => Object.values(s.sessions).sort((a, b) => a.hiker_code.localeCompare(b.hiker_code)),
     // PDR gabungan semua sesi aktif: total diterima / (diterima + hilang), paket pertama tiap sesi = jangkar.
@@ -24,6 +24,7 @@ export const useDiagnosticsStore = defineStore("diagnostics", {
         const d = await fetchDiagnostics();
         this.staleAfterS = d.stale_after_s;
         this.baseSet = d.base_set;
+        this.packetIndex = d.packet_index !== false; // false = DB lama berisi paket ganda, indeks anti-ganda belum dibuat
         this.clock = d.clock_check ?? null; // kesinkronan jam laptop vs jam GPS (backend/app/services/clock_check.py)
         this.sessions = Object.fromEntries(d.sessions.map((x) => [x.hiker_code, x]));
         try {

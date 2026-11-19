@@ -46,7 +46,11 @@ class DbIntegration(unittest.TestCase):
             async with pool.acquire() as c:
                 await schema.ensure_schema(c)
                 await schema.ensure_schema(c)
-                self.assertTrue(await c.fetchval("SELECT 1 FROM pg_indexes WHERE indexname = 'uq_positions_packet'"))
+                self.assertTrue(await schema.packet_index_exists(c))
+                await c.execute("DROP INDEX uq_positions_packet")
+                self.assertFalse(await schema.packet_index_exists(c))          # yang dibaca dashboard untuk peringatan
+                await schema.ensure_schema(c)
+                self.assertTrue(await schema.packet_index_exists(c))
         self.run_db(go)
 
     def test_paket_ganda_tidak_disimpan_dan_tidak_memicu_notify(self):
